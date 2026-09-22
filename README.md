@@ -6,7 +6,8 @@
 
 Aplicación distribuida basada en el modelo **Cliente/Servidor** desarrollada para la asignatura **Programación de Redes con Sockets (Optativa III - LAS)**.
 
-El sistema permite supervisar en tiempo real la disponibilidad, métricas de rendimiento y salud (CPU, Memoria RAM y Uso de Disco) de múltiples computadoras (nodos) distribuidas en una red local, además de permitir la ejecución de acciones administrativas de forma remota.
+El sistema permite supervisar en tiempo real la disponibilidad, métricas de rendimiento y salud (CPU, Memoria RAM y Uso de Disco) de múltiples computadoras (nodos) distribuidas en una red local, además de permitir la ejecución de acciones administrativas de forma remota.Estoy probando como funciona el commit
+
 
 ---
 
