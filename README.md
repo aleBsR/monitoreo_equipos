@@ -95,7 +95,8 @@ El sistema permite supervisar en tiempo real la disponibilidad, métricas de ren
 │   └── agent.py             # Agente de monitoreo de equipo local
 ├── client/
 │   ├── __init__.py
-│   └── admin_client.py      # Cliente de administración interactivo (CLI)
+│   ├── admin_client.py      # Cliente de administración interactivo (CLI)
+│   └── gui_monitor.py       # Dashboard gráfico (Tkinter) — cliente adicional
 ├── requirements.txt         # Dependencias opcionales (psutil, rich)
 ├── test_system.py           # Script de pruebas automatizadas de integración
 └── propuesta_tpi.md         # Documentación de diseño y arquitectura
@@ -141,6 +142,32 @@ python3 client/admin_client.py 127.0.0.1 5001
 **Credenciales de Administrador por defecto:**
 * **Usuario:** `admin` | **Contraseña:** `admin123`
 * **Usuario:** `operador` | **Contraseña:** `operador123`
+
+---
+
+## 🖥️ Interfaz Gráfica (Dashboard Tkinter)
+
+Para mostrar el proyecto de forma visual, existe un dashboard construido con
+`tkinter` (biblioteca estándar, sin dependencias extra):
+
+```bash
+python3 client/gui_monitor.py
+```
+
+Es un **cliente adicional** que habla el mismo protocolo `NETMON/1.0` por TCP;
+no reemplaza a la consola `admin_client.py` ni a los agentes socket nativos.
+
+Incluye tres pestañas:
+
+| Pestaña | Para qué sirve |
+| :--- | :--- |
+| **Nodos** | Tabla con la telemetría en vivo: ID, IP, estado y barras de CPU / RAM / Disco. Doble clic en una fila para usarla como destino de `EXEC`. |
+| **Demo Local** | Levanta el Servidor + N Agentes en procesos separados con un clic, conecta el dashboard automáticamente y permite detener todo. Ideal para una demostración de punta a punta sin abrir varias terminales. |
+| **Tráfico NETMON/1.0** | Volcado de cada trama `TX`/`RX` tal cual viaja por el socket, más un campo para enviar tramas inválidas a propósito y ver cómo el servidor responde con `ERR_100` / `ERR_103` sin cortar la conexión (RF07). |
+
+Notas:
+* Requiere un servidor con Tk instalado. En Linux suele necesitar `sudo apt install python3-tk`.
+* La actualización del dashboard usa `after()` en el hilo principal de Tk, porque Tkinter no es thread-safe.
 
 ---
 
