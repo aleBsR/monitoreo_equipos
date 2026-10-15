@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# =============================================================================
+#  SDMR - Lanzador de escritorio (Linux)
+# =============================================================================
+#  Abre el dashboard con un solo comando. La interfaz levanta por sí sola el
+#  Servidor Central y varios Agentes (pestaña Demo) para ver todo funcionando
+#  sin abrir varias terminales.
+#
+#  Uso:
+#      ./sdmr                 # dashboard + servidor + 3 agentes
+#      ./sdmr --agentes 5     # elegir cantidad de agentes
+#      ./sdmr --udp 6000 --tcp 6001
+#      ./sdmr --host 192.168.0.10 --tcp 5001   # conectarse a otro equipo
+# =============================================================================
+set -euo pipefail
+
+# La raíz del proyecto. Si este archivo está instalado como symlink (p. ej.
+# /usr/local/bin/sdmr -> <proyecto>/sdmr), hay que resolver el enlace antes de
+# armar las rutas, si no las rutas relativas se buscarían en /usr/local/bin.
+SRC="${BASH_SOURCE[0]}"
+while [ -L "$SRC" ]; do
+    DIR="$(cd -P "$(dirname "$SRC")" && pwd)"
+    SRC="$(readlink "$SRC")"
+    [[ "$SRC" != /* ]] && SRC="$DIR/$SRC"
+done
+RAIZ="$(cd -P "$(dirname "$SRC")" && pwd)"
+
+if [ ! -f "$RAIZ/client/gui_monitor.py" ]; then
+    echo "ERROR: no encuentro el proyecto en:"
+    echo "    $RAIZ"
+    echo "Este lanzador debe estar junto a client/, server/ y agent/."
+    exit 1
+fi
+
+# Intérprete (se puede sobreescribir con la variable de entorno PYTHON)
+PY="${PYTHON:-python3}"
+
+if ! command -v "$PY" >/dev/null 2>&1; then
+    echo "ERROR: no se encontró '$PY'. Instalá Python 3.8 o superior."
+    exit 1
+fi
+
+# Verificación de Tkinter (interfaz gráfica de la biblioteca estándar)
+if ! "$PY" -c "import tkinter" >/dev/null 2>&1; then
+    echo "ERROR: falta el módulo 'tkinter' (interfaz gráfica)."
+    echo "En Debian/Ubuntu instalalo con:"
+    echo "    sudo apt install python3-tk"
+    echo "O ejecutá ./instalar.sh para que lo deje listo."
+    exit 1
+fi
+
+# Por defecto arranca en modo demo (servidor + agentes + conexión automática).
+exec "$PY" -u "$RAIZ/client/gui_monitor.py" --demo "$@"

@@ -1,0 +1,25 @@
+MIT License
+
+Copyright (c) 2026 SDMR - Sistema Distribuido de Monitoreo en Red
+
+Por la presente se otorga permiso, libre de cargos, a cualquier persona que
+obtenga una copia de este software y de los archivos de documentación asociados
+(el "Software"), para utilizar el Software sin restricción, incluyendo, sin
+limitación, los derechos de usar, copiar, modificar, fusionar, publicar,
+distribuir, sublicenciar y/o vender copias del Software, y para permitir que las
+personas a las que se les proporcione el Software lo hagan, sujeto a las
+siguientes condiciones:
+
+El aviso de derechos de autor anterior y este aviso de permiso se incluirán en
+todas las copias o partes sustanciales del Software.
+
+EL SOFTWARE SE PROPORCIONA "TAL CUAL", SIN GARANTÍA DE NINGÚN TIPO, EXPRESA O
+IMPLÍCITA, INCLUYENDO, PERO NO LIMITADO A, LAS GARANTÍAS DE COMERCIABILIDAD,
+IDONEIDAD PARA UN PROPÓSITO PARTICULAR Y NO INFRACCIÓN. EN NINGÚN CASO LOS
+AUTORES O TITULARES DE LOS DERECHOS DE AUTOR SERÁN RESPONSABLES DE NINGUNA
+RECLAMACIÓN, DAÑO U OTRA RESPONSABILIDAD, YA SEA EN UNA ACCIÓN CONTRACTUAL,
+EXTRACONTRACTUAL O DE OTRO TIPO, QUE SURJA DE, O ESTÉ RELACIONADA CON EL
+SOFTWARE O EL USO U OTROS TRATOS EN EL SOFTWARE.
+
+This project was developed for educational purposes for the course
+"Programación de Redes con Sockets" (Optativa III - LAS).

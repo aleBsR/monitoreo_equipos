@@ -20,33 +20,42 @@ es la decisión de diseño central y todo lo demás se deriva de ahí.
 | :--- | :--- | :--- | :--- | :--- |
 | `server/server.py` | UDP | 5000 | 1 | Recibir telemetría y llenar el registro |
 | `server/server.py` | TCP | 5001 | 1 (principal) | Aceptar clientes y lanzar un hilo por cada uno |
-| `server/server.py` | — | — | 1 | Watchdog: marcar `OFFLINE` |
+| `server/server.py` | — | — | 1 | Watchdog: marcar `OFFLINE` y purgar |
 | `agent/agent.py` | UDP | — | 1 (proceso) | Medir y emitir cada 3 s |
+| `agent/agent.py` | TCP | 5002+ | 1 | Escuchar `EXECCMD` y ejecutar la orden |
 | `client/admin_client.py` | TCP | — | 1 (proceso) | CLI, un comando por vez |
 | `client/gui_monitor.py` | TCP | — | 1 + N hilos de E/S | Dashboard y demo auto-contenida |
 
 El servidor queda **con cuatro hilos vivos**: UDP, watchdog, accept, y uno por
-cliente TCP conectado.
+cliente TCP conectado. Cada agente suma un hilo más para su canal TCP de
+comandos.
 
 ---
 
 ## 2. Arranque, en orden exacto
 
-`MonitoringServer.start()` (`server.py:82`) hace esto y en este orden:
+`MonitoringServer.start()` (`server.py`) hace esto y en este orden:
 
 1. `is_running = True`.
 2. Imprime el banner.
-3. **Crea y abre el socket UDP**, con `SO_REUSEADDR`, y hace `bind`. Ya puede
-   recibir telemetría aunque el TCP todavía no exista.
+3. **Crea y abre el socket UDP**, con `SO_REUSEADDR`, y hace `bind` (vía
+   `_asociar_socket`). Si el puerto está ocupado (`EADDRINUSE`), imprime un
+   mensaje claro y sale con código 1. Ya puede recibir telemetría aunque el TCP
+   todavía no exista.
 4. Lanza el **hilo UDP** (`daemon=True`).
 5. Lanza el **hilo watchdog** (`daemon=True`).
-6. Solo ahora crea el socket TCP, `bind`, y `listen(5)` — el 5 es el backlog.
+6. Solo ahora crea el socket TCP, `bind`, y `listen(5)` — el 5 es el backlog,
+   también con la comprobación de puerto ocupado.
 7. Entra al **bucle de `accept()`** en el hilo principal, que se queda ahí
    bloqueado para siempre.
 
 Ese orden importa: el puerto UDP queda disponible antes que el TCP. Durante los
 tests se lanzan los agentes justo después del servidor, así que este detalle
-evita que la primera telemetría se pierda.
+evita que la primera telemetría se pierda. Los `bind` se hacen **antes** de
+lanzar los hilos para que un puerto ocupado falle limpio y no con un hilo a
+medio arrancar.
+
+Argumentos del servidor: `[udp_port] [tcp_port] [segundos_purga_offline]`.
 
 `stop()` invierte todo: `is_running = False` y cierra ambos sockets. Como los
 hilos son *daemon*, el proceso muere solo aunque alguno esté bloqueado en
@@ -58,7 +67,7 @@ hilos son *daemon*, el proceso muere solo aunque alguno esté bloqueado en
 
 ### 3.1 El agente mide y lanza
 
-Cada `interval` segundos (`agent.py:100`):
+Cada `interval` segundos (`agent.py`):
 
 1. `get_system_metrics()`. Con `psutil`: `cpu_percent(interval=None)`,
    `virtual_memory().percent`, `disk_usage('/').percent`. Sin `psutil`: valores
@@ -70,8 +79,12 @@ Cada `interval` segundos (`agent.py:100`):
 Sobre el cable, literalmente:
 
 ```
-MON|NODO_01|192.168.1.5|35.4|62.1|40.0|OK\n
+MON|NODO_01|192.168.1.5|35.4|62.1|40.0|OK|5002\n
 ```
+
+El último campo (`5002`) es el `PUERTO_CMD`: el puerto TCP donde ese agente
+escucha órdenes `EXEC`. Es **opcional** en el protocolo (el parseo acepta 7 u 8
+campos) pero el agente actual siempre lo envía si logró abrir su canal.
 
 Puntos que conviene tener claros:
 
@@ -87,26 +100,30 @@ Puntos que conviene tener claros:
 
 ### 3.2 El servidor recibe, valida y guarda
 
-En el hilo UDP (`server.py:132`):
+En el hilo UDP (`server.py`):
 
 1. `recvfrom(BUFFER_SIZE)` — bloqueante. Devuelve bytes y `(ip, puerto)`.
-2. `parse_udp_telemetry()` (`protocol.py:89`) valida:
-   - que la cabecera sea `MON` y haya al menos 7 campos;
+2. `parse_udp_telemetry()` (`protocol.py`) valida:
+   - que la cabecera sea `MON` y haya al menos 7 campos (7 **u** 8);
    - que CPU, RAM y disco parseen como `float`;
-   - que los tres estén en `[0, 100]`.
+   - que los tres estén en `[0, 100]`;
+   - si viene el 8º campo, que sea un puerto válido (`1..65535`).
    Si algo falla lanza `ValueError`, que se captura y se loguea. **El hilo
    sigue vivo.** Ese es el requisito RF07.
-3. Con `registry_lock` tomado, escribe la entrada completa del nodo.
+3. Con `registry_lock` tomado, escribe la entrada completa del nodo, incluido
+   `cmd_port`.
 4. Imprime una línea por paquete recibido.
 
-### 3.3 El watchdog vigila
+### 3.3 El watchdog vigila y purga
 
-Hilo independiente, `time.sleep(5)` por vuelta (`server.py:176`):
+Hilo independiente, `time.sleep(5)` por vuelta (`server.py`):
 
 ```python
 elapsed = now - data["last_seen"]
 if elapsed > 15 and data["status"] != "OFFLINE":
     data["status"] = "OFFLINE"
+if elapsed > offline_purge_seconds:   # 120 s por defecto
+    del nodes_registry[node_id]        # purga
 ```
 
 **Matemática de la detección:** el chequeo corre cada 5 s y el umbral es 15 s,
@@ -117,13 +134,19 @@ paquetes perdidos seguidos sin falsos positivos.
 El `!= "OFFLINE"` evita reimprimir la alerta cada 5 segundos. Y como el paso 3.2
 reescribe la entrada entera cuando vuelve la telemetría, **la recuperación es
 automática y sin handshake**: el nodo pasa de `OFFLINE` a `OK` solo porque llegó
-un paquete.
+un paquete. Si el nodo estuvo caído más de `offline_purge_seconds`, se borra del
+registro y al volver reaparece como entrada nueva.
 
 ### 3.4 El cliente pregunta por TCP
 
 Conexión dedicada, con hilo propio. El ciclo por comando es siempre el mismo:
 `build_tcp_command()` → `encode_message()` (agrega `\n`) → `sendall()` →
-lectura → `parse_tcp_response()`.
+lectura con `TcpFrameReader` → `parse_tcp_response()`.
+
+`TcpFrameReader` acumula bytes hasta encontrar `\n`, así que una trama partida en
+varios segmentos o dos tramas pegadas en uno solo se separan bien. Tiene tope de
+8 KB: si el buffer crece más sin ver un `\n`, descarta y responde `ERR_100`.
+El mismo acumulador lo usan servidor, cliente y agente.
 
 La respuesta de `GET_NODES` trae **todo el estado en un solo campo**:
 
@@ -139,6 +162,29 @@ parseo. Es la discrepancia número uno con `propuesta.md:101`, que sí documenta
 
 `GET_NODES` **ignora su parámetro**: mandes lo que mandes tras `GET_NODES`, el
 parámetro se descarta. El `ALL` del README es decorativo.
+
+### 3.5 El recorrido de un EXEC (extremo a extremo)
+
+Es el único comando que sale del servidor hacia otro proceso. Cadena completa
+cuando el admin manda `CMD|EXEC|NODO_01|DIAGNOSTIC`:
+
+1. El servidor busca `NODO_01` en `nodes_registry`. Si no existe o está
+   `OFFLINE` → `ERR_102`.
+2. Toma el `cmd_port` guardado de ese nodo. Si el nodo nunca reportó un puerto
+   de comandos → `ERR_104`.
+3. Abre una conexión TCP **nueva** al `(ip, cmd_port)` del agente, con timeout de
+   3 s (`_ejecutar_en_nodo`). Si no conecta → `ERR_104`.
+4. Envía `EXECCMD|<COMANDO>` y espera la respuesta con `TcpFrameReader`.
+5. El agente (`agent.py`, canal TCP) valida el comando contra
+   `COMANDOS_PERMITIDOS = {RESTART_SERVICE, DIAGNOSTIC, CLEAR_LOGS}`, lo ejecuta
+   (simulado, con resultado textual), lo registra en
+   `agent/historial_comandos.log` y responde `RES|OK|<COMANDO>|<resultado>`.
+   Un comando fuera de la lista se rechaza.
+6. El servidor reenvía al admin `RES|OK|EXEC_SUCCESS|<resultado del agente>`.
+
+Ojo con el diseño: **cada EXEC abre y cierra su propio socket TCP** hacia el
+agente. No hay canal persistente servidor→agente; el agente atiende una orden
+por conexión.
 
 ---
 
@@ -164,12 +210,16 @@ parámetro se descarta. El `ALL` del README es decorativo.
         │   ┌───────────┐               │
         └────┤  OFFLINE  │───────────────┘
             └───────────┘   llega un paquete nuevo
+                  │
+                  └── si pasa > offline_purge_seconds
+                       del último last_seen, se BORRA
 ```
 
 - `OK` y `WARNING` los decide **el agente**, no el servidor. El servidor solo
-  añade `OFFLINE`.
-- El watchdog **no borra** nodos. El registro crece sin límite durante la
-  ejecución; en un TP de minutos no se nota.
+  añade `OFFLINE` y, tras `offline_purge_seconds` (120 s por defecto), lo **purga**.
+- Un nodo purgado deja de aparecer en `GET_NODES`. Si vuelve a enviar un paquete,
+  reaparece con los campos completos (incluido `cmd_port`) como una nueva
+  entrada.
 
 ---
 
@@ -215,7 +265,9 @@ Comportamiento real, verificado. **Ningún error cierra la conexión TCP.**
 | `CMD\|EXEC` (sin parámetros) | `ERR_100` Uso correcto: `CMD\|EXEC\|<ID>\|<CMD>` | sí |
 | `CMD\|EXEC\|NODO_99\|X` | `ERR_102` no está registrado | sí |
 | `CMD\|EXEC\|<offline>\|X` | `ERR_102` se encuentra OFFLINE | sí |
-| `CMD\|EXEC\|NODO_01\|X` | `OK` `EXEC_SUCCESS` ← **miente, no ejecuta nada** | sí |
+| `CMD\|EXEC\|NODO_01\|DIAGNOSTIC` | `OK` `EXEC_SUCCESS\|[NODO_01] Resultado: ...` | sí |
+| `CMD\|EXEC\|NODO_01\|COMANDO_INEXISTENTE` | `ERR_104` Comando no permitido / no soportado | sí |
+| `CMD\|EXEC\|NODO_01\|X` (sin canal) | `ERR_104` No se pudo ejecutar en el nodo | sí |
 | `CMD\|CUALQUIER_COSA` | `ERR_103` no reconocido por NETMON/1.0 | sí |
 | `DATOS_BASURA_SIN_CMD` | `ERR_100` debe iniciar con la cabecera `CMD` | sí |
 | `RES\|OK\|...` por TCP | `ERR_100` misma causa, cabecera incorrecta | sí |
@@ -225,14 +277,24 @@ Lado UDP — todo se descarta en silencio, solo un print:
 
 | Datagrama | Resultado |
 | :--- | :--- |
-| `MON\|NODO_01\|1.2.3.4\|35.4\|62.1\|40.0\|OK` | aceptado |
+| `MON\|NODO_01\|1.2.3.4\|35.4\|62.1\|40.0\|OK` (7 campos) | aceptado, `cmd_port` queda `None` |
+| `MON\|NODO_01\|1.2.3.4\|35.4\|62.1\|40.0\|OK\|5002` (8 campos) | aceptado con el puerto de comandos |
+| `MON\|NODO_01\|1.2.3.4\|35.4\|62.1\|40.0\|OK\|99999` | descartado: puerto fuera de rango |
 | `MON\|NODO_01\|1.2.3.4\|150\|62\|40\|OK` | descartado: fuera de `[0,100]` |
 | `MON\|NODO_01\|1.2.3.4\|abc\|62\|40\|OK` | descartado: no es float |
 | `MON\|NODO_01` | descartado: menos de 7 campos |
 | `HOLA\|...` | descartado: cabecera incorrecta |
 | `MON\|\|1.2.3.4\|1\|1\|1\|OK` | **aceptado con id vacío** — hueco de validación |
 
-`ERR_500` está definido en `protocol.py:50` pero **ningún camino lo emite**.
+Framing TCP — el acumulador (`TcpFrameReader`) hace la separación:
+
+| Situación | Resultado |
+| :--- | :--- |
+| `CMD\|PING` y `CMD\|GET_NODES\|ALL` en un solo `send()` | dos respuestas correctas, separadas |
+| `CMD\|GET_` en un paquete y `NODES\|ALL` en el siguiente | una sola respuesta al juntarse los dos |
+| trama sin `\n` que supera 8 KB | buffer descartado, `ERR_100` |
+
+`ERR_500` está definido en `protocol.py` pero **ningún camino lo emite**.
 
 ---
 
@@ -272,29 +334,28 @@ Lo que alguien ve si pulsa *Iniciar Demo* en la GUI:
 Si se detiene un agente, la realidad es esta: el watchdog lo ve entre 15 y 20 s
 después del último paquete. La fila se pone roja sola, sin que nadie la toque.
 
+Detalle de la demo: si el puerto pedido está ocupado, la GUI avanza al siguiente
+libre y le asigna a cada agente un puerto TCP de comandos distinto (5002, 5003,
+…) para que los `EXEC` no se pisen.
+
 ---
 
 ## 9. Dónde el comportamiento real se aparta de la documentación
 
-Tres cosas que conviene decir antes de que las pregunten:
+Dos cosas que conviene decir antes de que las pregunten:
 
-1. **`EXEC` es un stub.** `server.py:323` devuelve `EXEC_SUCCESS` sin ejecutar
-   nada. El agente **no tiene socket TCP**: no hay forma de que el comando
-   llegue. `propuesta.md:69` sí lo exige.
-2. **No hay alertas push al administrador.** `propuesta.md:15` promete
+1. **No hay alertas push al administrador.** `propuesta.md` promete
    "recepción de alertas críticas" por TCP. El watchdog solo imprime en la
    consola del servidor; no notifica a nadie. Un cliente conectado nunca se
-   entera de que un nodo cayó.
-3. **El servidor no encuadra tramas.** `server.py:227` hace un solo `recv()` y
-   asume que llegó exactamente un mensaje. Consecuencia medida: enviar
-   `CMD|PING\nCMD|GET_NODES|ALL` en un mismo `send()` produce
-   `ERR_103|Comando 'PING\nCMD' no reconocido`. Peor: como la respuesta de error
-   *hereda* ese salto de línea, el cliente puede leer una respuesta partida como
-   si fueran dos.
+   entera de que un nodo cayó, salvo que lo consulte con `GET_NODES`.
+2. **`propuesta.md` documenta respuestas con `|` y un `<TOKEN>` de auth.** El
+   código real usa `;`/`:` en `GET_NODES` y no emite ningún token. El README
+   refleja el código.
 
 Lo que sí funciona y es defendible: concurrencia multi-hilo, exclusión mutua del
-registro, detección de inactividad, validación estricta de entrada, y la
-tolerancia a errores sin colapso (RF07).
+registro, detección de inactividad con purga, encuadrado de tramas TCP,
+ejecución remota real sobre un canal TCP dedicado, validación estricta de
+entrada, y la tolerancia a errores sin colapso (RF07).
 
 ---
 
@@ -311,6 +372,17 @@ Preguntas que casi seguro llegan, con la respuesta corta:
   15 y 20 s. Se recupera solo al volver a recibir un paquete, sin handshake.
 - **"¿Y si mandan basura?"** → El protocolo la rechaza con un error tipificado y
   la conexión sigue abierta. Eso es RF07, y está en la matriz de la §6.
-- **"¿Qué pasa si mandan dos comandos juntos?"** → Ahí hay que ser honesto: el
-  servidor no lo tolera, es el bug de §9.3. La GUI sí lo hace bien con un búfer
-  acumulador.
+- **"¿Qué pasa si mandan dos comandos juntos?"** → El `TcpFrameReader` del
+  servidor los separa por `\n` y responde uno por uno; el cliente hace lo mismo
+  con las respuestas. También cubre la trama partida a mitad de segmento.
+- **"¿Y el EXEC, hace algo de verdad?"** → Sí: el servidor abre un TCP al
+  `PUERTO_CMD` que el agente anunció en su telemetría, manda `EXECCMD|<CMD>`, el
+  agente valida contra una lista blanca, lo ejecuta, lo loguea en
+  `agent/historial_comandos.log` y devuelve el resultado. Si el nodo no tiene
+  canal o el comando no está permitido, responde `ERR_104`.
+- **"¿Qué pasa si el puerto ya está ocupado?"** → El servidor detecta
+  `EADDRINUSE`, imprime un mensaje claro y sale con código 1 (requisito del
+  TP §6). La demo de la GUI en cambio avanza sola al siguiente puerto libre.
+- **"¿Y si el nodo se cae para siempre?"** → El watchdog lo marca `OFFLINE`
+  a los 15-20 s y lo **purga** del registro a los 120 s (configurable), para que
+  `nodes_registry` no crezca sin límite.

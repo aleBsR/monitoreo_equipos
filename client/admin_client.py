@@ -28,7 +28,7 @@ from common.protocol import (
     build_tcp_command,
     parse_tcp_response,
     encode_message,
-    decode_message
+    TcpFrameReader
 )
 
 
@@ -44,6 +44,8 @@ class AdminClient:
         self.is_connected = False
         self.is_authenticated = False
         self.username = None
+        # Separador de tramas del flujo TCP: recv() no garantiza una trama por llamada
+        self.frame_reader = TcpFrameReader()
 
     def connect(self) -> bool:
         """
@@ -63,6 +65,8 @@ class AdminClient:
             # Remover timeout para operaciones subsecuentes de recepción si se desea
             self.tcp_socket.settimeout(None)
             self.is_connected = True
+            # Buffer de encuadrado limpio para esta conexión
+            self.frame_reader = TcpFrameReader()
             print("[TCP] ¡Conexión TCP establecida con éxito con el servidor!")
             return True
 
@@ -75,6 +79,27 @@ class AdminClient:
         except Exception as e:
             print(f"[ERROR TCP] No se pudo establecer la conexión: {e}")
             return False
+
+    def _esperar_trama(self) -> str:
+        """
+        Recibe del socket hasta completar UNA trama del protocolo (hasta '\\n').
+
+        TCP es un flujo de bytes: una respuesta puede llegar fragmentada en
+        varios `recv()` o junto con otra respuesta. Se acumula mediante el
+        `TcpFrameReader` de la conexión.
+
+        :return: Trama de texto completa.
+        :raises ConnectionError: Si el servidor cierra la conexión.
+        """
+        while True:
+            if self.frame_reader.hay_tramas():
+                return self.frame_reader.siguiente_trama()
+
+            response_bytes = self.tcp_socket.recv(BUFFER_SIZE)
+            if not response_bytes:
+                raise ConnectionError("El servidor cerró la conexión.")
+
+            self.frame_reader.feed(response_bytes)
 
     def send_command(self, action: str, *params) -> dict:
         """
@@ -92,23 +117,34 @@ class AdminClient:
             # 2. Transmitir por el socket TCP usando sendall()
             self.tcp_socket.sendall(raw_bytes)
 
-            # 3. Recibir la respuesta del servidor usando recv()
-            response_bytes = self.tcp_socket.recv(BUFFER_SIZE)
-            
-            if not response_bytes:
-                print("[TCP] El servidor cerró la conexión.")
-                self.is_connected = False
-                return {"status": "ERR", "payload_or_code": "SERVER_DISCONNECTED", "detail": "Conexión cerrada"}
+            # 3. Recibir la respuesta del servidor (encuadrada por '\\n')
+            response_str = self._esperar_trama()
 
-            response_str = decode_message(response_bytes)
-            
             # 4. Parsear la respuesta
             return parse_tcp_response(response_str)
 
+        except ConnectionError as e:
+            print(f"[TCP] {e}")
+            self.is_connected = False
+            return {"status": "ERR", "payload_or_code": "SERVER_DISCONNECTED", "detail": "Conexión cerrada"}
         except Exception as e:
             print(f"[ERROR TCP en transmisión/recepción]: {e}")
             self.is_connected = False
             return {"status": "ERR", "payload_or_code": "SOCKET_ERROR", "detail": str(e)}
+
+    def send_raw(self, payload: str) -> str:
+        """
+        Envía una cadena CRUDA por el socket TCP (sin validar) y devuelve la
+        respuesta cruda del servidor. Útil para probar datos malformados (RF07).
+
+        :raises ConnectionError: Si el servidor cierra la conexión.
+        :raises socket.timeout: Si el servidor no responde dentro del tiempo de espera.
+        """
+        if not self.is_connected:
+            raise ConnectionError("No hay una conexión TCP activa con el servidor.")
+
+        self.tcp_socket.sendall(encode_message(payload))
+        return self._esperar_trama()
 
     def authenticate_interactive(self):
         """
@@ -163,7 +199,7 @@ class AdminClient:
         Envía una orden remota a un nodo a través del servidor central.
         """
         node_id = input("Ingrese el ID del nodo destino (ej. NODO_01): ").strip()
-        cmd_name = input("Ingrese la acción/comando (ej. RESTART, DIAGNOSTIC, CLEAR_LOGS): ").strip()
+        cmd_name = input("Ingrese la acción/comando (ej. RESTART_SERVICE, DIAGNOSTIC, CLEAR_LOGS): ").strip()
 
         resp = self.send_command("EXEC", node_id, cmd_name)
         if resp["status"] == "OK":
@@ -171,17 +207,25 @@ class AdminClient:
         else:
             print(f"❌ Error [{resp['payload_or_code']}]: {resp['detail']}")
 
-    def send_malformed_test(self):
+    def send_malformed_test(self, sub_opt: str = None, custom_payload: str = None) -> str:
         """
         Permite enviar paquetes malformados o inválidos a propósito para verificar
         el manejo de errores y validaciones en el servidor (RF07 / Seccion 6 del TP).
+
+        :param sub_opt: Opción '1'..'4' para ejecutar la prueba de forma
+            NO INTERACTIVA (útil desde scripts de prueba). Si es None se
+            muestra el menú por consola como siempre.
+        :param custom_payload: Texto exacto a enviar cuando sub_opt es '4'.
+        :return: Respuesta cruda recibida del servidor (cadena).
         """
         print("\n--- PRUEBA DE VALIDACIÓN Y MANEJO DE ERRORES (DATOS INVÁLIDOS) ---")
         print(" 1. Enviar cadena sin cabecera CMD ('DATOS_BASURA_SIN_CMD')")
         print(" 2. Enviar comando inexistente ('CMD|ACCION_DESCONOCIDA')")
         print(" 3. Enviar comando AUTH con parámetros faltantes ('CMD|AUTH')")
         print(" 4. Escribir una cadena personalizada personalizada para enviar por el socket")
-        sub_opt = input("Seleccione tipo de prueba (1-4): ").strip()
+
+        if sub_opt is None:
+            sub_opt = input("Seleccione tipo de prueba (1-4): ").strip()
 
         payload = ""
         if sub_opt == "1":
@@ -191,26 +235,26 @@ class AdminClient:
         elif sub_opt == "3":
             payload = "CMD|AUTH"
         elif sub_opt == "4":
-            payload = input("Ingrese el texto exacto a enviar por el socket TCP: ").strip()
+            if custom_payload is None:
+                custom_payload = input("Ingrese el texto exacto a enviar por el socket TCP: ").strip()
+            payload = custom_payload
         else:
             print("Opción inválida. Cancelando prueba.")
-            return
+            return ""
 
         print(f"\n[CLIENTE TCP] Enviando trama por socket: '{payload}'")
         try:
-            # Transmitir la cadena cruda codificada
-            self.tcp_socket.sendall(encode_message(payload))
-            
-            # Recibir respuesta del servidor
-            response_bytes = self.tcp_socket.recv(BUFFER_SIZE)
-            respuesta = decode_message(response_bytes)
-            
+            # Transmitir la cadena cruda y esperar la respuesta encuadrada por '\n'
+            respuesta = self.send_raw(payload)
+
             print("-----------------------------------------------------------------")
             print(f"📩 [RESPUESTA DEL SERVIDOR (TCP)]: {respuesta}")
             print("-----------------------------------------------------------------")
             print("💡 Explicación: El servidor procesó el error sin colapsar ni cerrar la conexión.")
+            return respuesta
         except Exception as e:
             print(f"[Error en prueba de transmisión]: {e}")
+            return ""
 
     def run_menu(self):
         """
@@ -260,6 +304,7 @@ class AdminClient:
                 self.tcp_socket.close()
             except Exception:
                 pass
+        self.frame_reader = TcpFrameReader()
         print("[TCP] Socket cerrado.")
 
 

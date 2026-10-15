@@ -11,11 +11,16 @@ sección 2.2 de la propuesta (la interfaz es un "Desafío Adicional" que no
 sustituye a los clientes socket nativos).
 
 Pestañas de la interfaz:
-  1. Nodos    -> Tabla con telemetría en vivo (CPU / RAM / Disco por nodo).
-  2. Demo     -> Levanta Servidor + N Agentes en un clic, para mostrar el
-                  proyecto funcionando de punta a punta.
-  3. Tráfico  -> Log con las tramas NETMON/1.0 reales enviadas y recibidas,
-                  útil para explicar el protocolo en la defensa.
+  1. Nodos         -> Tabla con telemetría en vivo (CPU / RAM / Disco por nodo).
+  2. Demo          -> Levanta Servidor + N Agentes en un clic, para mostrar el
+                      proyecto funcionando de punta a punta.
+  3. Tráfico       -> Log con las tramas NETMON/1.0 reales enviadas y recibidas,
+                      útil para explicar el protocolo en la defensa.
+  4. Instrucciones -> Guía de uso: cómo levantar el sistema, comandos, puertos y
+                      problemas frecuentes (pestaña sin conexión, no necesita
+                      servidor en marcha).
+  5. Conceptos     -> Definiciones de TCP, UDP, sockets y puertos tomadas
+                      literalmente de la bibliografía (Kurose, 5.ª ed.).
 
 Decisiones de diseño:
   - Solo biblioteca estándar (tkinter). No depende de frameworks web ni de
@@ -46,11 +51,13 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from common.protocol import (
     DEFAULT_UDP_PORT,
     DEFAULT_TCP_PORT,
+    DEFAULT_AGENT_TCP_PORT,
     BUFFER_SIZE,
     ENCODING,
     build_tcp_command,
     parse_tcp_response,
 )
+from client.contenido_ayuda import INSTRUCCIONES, CONCEPTOS, FUENTE_LIBRO
 
 # Límite de líneas retenidas en el log para no degradar la interfaz
 MAX_LOG_LINES = 2000
@@ -84,11 +91,12 @@ class SDMRMonitorGUI:
     Ventana principal del dashboard de monitoreo SDMR.
     """
 
-    def __init__(self, root: tk.Tk):
+    def __init__(self, root: tk.Tk, opciones: dict = None):
         self.root = root
         self.root.title("SDMR · Sistema Distribuido de Monitoreo en Red")
         self.root.geometry("1060x720")
         self.root.minsize(940, 600)
+        self.opciones = opciones or {}
 
         # ---------------------------------------------------------
         # Estado de la conexión TCP con el servidor central
@@ -111,6 +119,11 @@ class SDMRMonitorGUI:
         self._poll_job = None
         self._ultima_actualizacion = 0.0
 
+        # ---------------------------------------------------------
+        # Estado de las pestañas de ayuda (instrucciones / conceptos)
+        # ---------------------------------------------------------
+        self._ayuda_tabs = []
+
         self._construir_estilos()
         self._construir_interfaz()
 
@@ -119,6 +132,35 @@ class SDMRMonitorGUI:
         self.root.protocol("WM_DELETE_WINDOW", self.cerrar)
 
         self._registrar("Sistema", "Dashboard listo. Pestaña 'Demo' para levantar todo con un clic.", "sys")
+
+        # Aplica opciones de arranque (--demo, --agentes, --udp, --tcp, --host)
+        self._aplicar_opciones_arranque()
+
+    def _aplicar_opciones_arranque(self):
+        """
+        Prellena los campos de conexión según los argumentos de línea de
+        comandos y, si se pidió `--demo`, levanta el sistema completo solo.
+        """
+        op = self.opciones
+        if not op:
+            return
+
+        campos = (
+            (self.entrada_host, op.get("host")),
+            (self.entrada_puerto, op.get("tcp")),
+            (self.entrada_puerto_udp, op.get("udp")),
+            (self.entrada_agentes, op.get("agentes")),
+        )
+        for entrada, valor in campos:
+            if valor is None:
+                continue
+            entrada.delete(0, "end")
+            entrada.insert(0, str(valor))
+
+        if op.get("demo"):
+            self.notebook.select(1)  # pestaña Demo
+            # Pequeña espera para que la ventana se dibuje antes de lanzar todo
+            self.root.after(600, self.iniciar_demo)
 
     # =====================================================================
     # CONSTRUCCIÓN DE LA INTERFAZ
@@ -198,13 +240,15 @@ class SDMRMonitorGUI:
         self.entrada_intervalo.grid(row=1, column=6, sticky="e", padx=(16, 4), pady=(8, 0))
         ttk.Label(marco_conexion, text="s").grid(row=1, column=7, sticky="w", pady=(8, 0))
 
-        # ---------------- Notebook con las tres pestañas ----------------
+        # ---------------- Notebook con las cinco pestañas ----------------
         self.notebook = ttk.Notebook(contenedor)
         self.notebook.grid(row=1, column=0, sticky="nsew")
 
         self._construir_pestana_nodos()
         self._construir_pestana_demo()
         self._construir_pestana_trafico()
+        self._construir_pestana_instrucciones()
+        self._construir_pestana_conceptos()
 
         # ---------------- Barra de estado ----------------
         self.barra_estado = tk.StringVar(value="Desconectado")
@@ -236,7 +280,7 @@ class SDMRMonitorGUI:
         self.entrada_nodo.pack(side="left", padx=(0, 12))
 
         ttk.Label(barra, text="Comando remoto:").pack(side="left", padx=(0, 4))
-        self.entrada_comando = ttk.Combobox(barra, width=16, values=["RESTART", "DIAGNOSTIC", "CLEAR_LOGS"])
+        self.entrada_comando = ttk.Combobox(barra, width=16, values=["RESTART_SERVICE", "DIAGNOSTIC", "CLEAR_LOGS"])
         self.entrada_comando.set("DIAGNOSTIC")
         self.entrada_comando.pack(side="left", padx=(0, 8))
         ttk.Button(barra, text="Enviar (EXEC)", command=self.ejecutar_comando).pack(side="left")
@@ -373,6 +417,200 @@ class SDMRMonitorGUI:
                  "'CMD|ACCION_DESCONOCIDA' (ERR_103) · 'CMD|AUTH' (ERR_100)",
             style="Hint.TLabel"
         ).pack(anchor="w", pady=(8, 0))
+
+    # =====================================================================
+    # PESTAÑAS DE AYUDA (instrucciones de uso y conceptos de red)
+    # =====================================================================
+
+    def _construir_pestana_instrucciones(self):
+        """
+        Pestaña 4: guía de uso de la aplicación. No necesita servidor en marcha.
+        """
+        self._pestaña_ayuda(
+            titulo="Instrucciones de uso",
+            items=INSTRUCCIONES,
+            ayuda="Índice de la guía · el contenido es material del proyecto.",
+        )
+
+    def _construir_pestana_conceptos(self):
+        """
+        Pestaña 5: definiciones de la bibliografía (Kurose). Sin conexión.
+        """
+        self._pestaña_ayuda(
+            titulo="Conceptos de red (TCP / UDP)",
+            items=CONCEPTOS,
+            ayuda="Definiciones tomadas literalmente de la bibliografía. "
+                  "Fuente: " + FUENTE_LIBRO,
+            con_buscador=True,
+        )
+
+    def _pestaña_ayuda(self, titulo, items, ayuda, con_buscador=False):
+        """
+        Arma una pestaña con un índice a la izquierda y el texto a la derecha.
+
+        Cada pestaña conserva su propio estado (índice, texto y buscador) en un
+        diccionario, de modo que dos pestañas de ayuda no pisen sus widgets.
+
+        :param titulo: Encabezado superior de la pestaña.
+        :param items: Lista de dicts con claves 'titulo', 'texto' y opcional 'fuente'.
+        :param ayuda: Texto de la línea inferior (fuente / nota).
+        :param con_buscador: Si es True agrega un campo de filtrado del índice.
+        :return: El estado de la pestaña creada.
+        """
+        estado = {"items": items, "visibles": list(items), "busqueda": None}
+
+        marco = ttk.Frame(self.notebook, padding=10)
+        self.notebook.add(marco, text="  %s  " % titulo)
+        marco.rowconfigure(1, weight=1)
+        marco.columnconfigure(1, weight=1)
+
+        cabecera = ttk.Frame(marco)
+        cabecera.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        ttk.Label(cabecera, text=titulo, style="Header.TLabel").pack(side="left")
+        if con_buscador:
+            ttk.Button(cabecera, text="Limpiar",
+                       command=lambda: self._filtro_ayuda_limpiar(estado)).pack(side="right")
+            ttk.Label(cabecera, text="Buscar:").pack(side="right", padx=(8, 4))
+            entrada = ttk.Entry(cabecera, width=24)
+            entrada.pack(side="right")
+            entrada.bind("<KeyRelease>", lambda e: self._filtrar_ayuda(estado, e))
+            estado["busqueda"] = entrada
+
+        # --- Índice (izquierda) ---
+        marco_indice = ttk.LabelFrame(marco, text=" Índice ", padding=6)
+        marco_indice.grid(row=1, column=0, sticky="ns", padx=(0, 8))
+
+        scroll_indice = ttk.Scrollbar(marco_indice, orient="vertical")
+        scroll_indice.pack(side="right", fill="y")
+        lista = tk.Listbox(
+            marco_indice, width=44, font=("Segoe UI", 10), activestyle="dotbox",
+            yscrollcommand=scroll_indice.set, exportselection=False, highlightthickness=0
+        )
+        lista.pack(fill="both", expand=True)
+        scroll_indice.configure(command=lista.yview)
+        lista.bind("<<ListboxSelect>>", lambda e: self._al_elegir_ayuda(estado, e))
+        for item in estado["visibles"]:
+            lista.insert("end", item["titulo"])
+        estado["lista"] = lista
+
+        # --- Texto (derecha) ---
+        marco_texto = ttk.Frame(marco)
+        marco_texto.grid(row=1, column=1, sticky="nsew")
+        marco_texto.rowconfigure(1, weight=1)
+        marco_texto.columnconfigure(0, weight=1)
+
+        scroll_texto = ttk.Scrollbar(marco_texto, orient="vertical")
+        scroll_texto.grid(row=1, column=1, sticky="ns")
+        cuadro = tk.Text(
+            marco_texto, font=("Segoe UI", 10), wrap="word", bd=1, relief="solid",
+            padx=14, pady=12, spacing3=6, yscrollcommand=scroll_texto.set,
+            cursor="arrow"
+        )
+        cuadro.grid(row=1, column=0, sticky="nsew")
+        scroll_texto.configure(command=cuadro.yview)
+        estado["texto"] = cuadro
+
+        cuadro.tag_configure("titulo", font=("Segoe UI", 13, "bold"),
+                             foreground="#0b5394", spacing1=4, spacing3=8)
+        cuadro.tag_configure("fuente", font=("Segoe UI", 9, "italic"),
+                             foreground="#7a7a7a", spacing3=10)
+        cuadro.tag_configure("cuerpo", font=("Segoe UI", 10),
+                             lmargin1=6, lmargin2=6, spacing3=8)
+        cuadro.tag_configure("viñeta", font=("Segoe UI", 10),
+                             lmargin1=22, lmargin2=40, spacing3=4)
+        cuadro.tag_configure("cmd", font=("Consolas", 10),
+                             lmargin1=22, lmargin2=40, spacing3=4,
+                             foreground="#0b5394")
+        cuadro.tag_configure("nota", font=("Segoe UI", 9, "italic"),
+                             foreground="#7a7a7a", lmargin1=6, spacing3=6)
+
+        # Solo lectura: no se puede editar, pero sí copiar con Ctrl+C.
+        cuadro.bind("<Key>", self._texto_ayuda_solo_lectura)
+
+        ttk.Label(marco, text=ayuda, style="Hint.TLabel", wraplength=760,
+                  justify="left").grid(row=2, column=0, columnspan=2, sticky="w",
+                                       pady=(8, 0))
+
+        # Pinta la primera entrada una vez que el widget de texto existe.
+        if estado["visibles"]:
+            lista.selection_set(0)
+            self._mostrar_entrada_ayuda(estado, 0)
+        else:
+            cuadro.insert("end", "Sin entradas.", "nota")
+            cuadro.configure(state="disabled")
+
+        self._ayuda_tabs.append(estado)
+        return estado
+
+    @staticmethod
+    def _texto_ayuda_solo_lectura(event):
+        """
+        Bloquea la escritura en el texto de ayuda. Ctrl+C y Ctrl+A siguen
+        funcionando para copiar o seleccionar el contenido.
+        """
+        if event.state & 0x0004:  # tecla Control
+            if event.keysym.lower() in ("c", "a"):
+                return None
+        return "break"
+
+    @staticmethod
+    def _al_elegir_ayuda(estado, _evento):
+        """Selecciona el texto de la entrada elegida en el índice."""
+        sel = estado["lista"].curselection()
+        if sel:
+            SDMRMonitorGUI._mostrar_entrada_ayuda(estado, sel[0])
+
+    @staticmethod
+    def _mostrar_entrada_ayuda(estado, posicion):
+        """Vuelca la entrada elegida en el widget de texto de solo lectura."""
+        visibles = estado["visibles"]
+        if posicion >= len(visibles):
+            return
+        item = visibles[posicion]
+        cuadro = estado["texto"]
+        cuadro.delete("1.0", "end")
+        cuadro.insert("end", item["titulo"] + "\n", "titulo")
+        if item.get("fuente"):
+            cuadro.insert("end", item["fuente"] + "\n\n", "fuente")
+        else:
+            cuadro.insert("end", "\n", "fuente")
+        for linea in item["texto"].split("\n"):
+            if not linea.strip():
+                cuadro.insert("end", "\n")
+            elif linea.lstrip().startswith("•"):
+                cuadro.insert("end", linea + "\n", "viñeta")
+            elif "python3" in linea or "sdmr " in linea or linea.lstrip().startswith("CMD|"):
+                cuadro.insert("end", linea + "\n", "cmd")
+            else:
+                cuadro.insert("end", linea + "\n", "cuerpo")
+        cuadro.see("1.0")
+
+    @staticmethod
+    def _filtrar_ayuda(estado, _evento):
+        """Filtra el índice del estado recibido según el campo 'Buscar'."""
+        busqueda = estado.get("busqueda")
+        texto = (busqueda.get().strip().lower() if busqueda else "")
+        lista, cuadro = estado["lista"], estado["texto"]
+        lista.delete(0, "end")
+        estado["visibles"] = []
+        for item in estado["items"]:
+            if not texto or texto in item["titulo"].lower() or texto in item["texto"].lower():
+                estado["visibles"].append(item)
+                lista.insert("end", item["titulo"])
+        if estado["visibles"]:
+            lista.selection_set(0)
+            SDMRMonitorGUI._mostrar_entrada_ayuda(estado, 0)
+        else:
+            cuadro.delete("1.0", "end")
+            cuadro.insert("end", "Sin coincidencias.", "nota")
+
+    @staticmethod
+    def _filtro_ayuda_limpiar(estado):
+        """Vacía el campo de búsqueda y repone el índice completo."""
+        busqueda = estado.get("busqueda")
+        if busqueda:
+            busqueda.delete(0, "end")
+        SDMRMonitorGUI._filtrar_ayuda(estado, None)
 
     # =====================================================================
     # COMUNICACIÓN TCP
@@ -616,7 +854,10 @@ class SDMRMonitorGUI:
         """
         seleccion = self.tabla_nodos.selection()
         if seleccion:
-            self.entrada_nodo.set(seleccion[0])
+            # ttk.Entry no tiene .set(): hay que borrar e insertar.
+            self.entrada_nodo.delete(0, "end")
+            self.entrada_nodo.insert(0, seleccion[0])
+            self._registrar("Sistema", "Destino de EXEC seleccionado: %s" % seleccion[0], "sys")
 
     def ejecutar_comando(self):
         """
@@ -710,6 +951,37 @@ class SDMRMonitorGUI:
     # DEMO LOCAL: SERVIDOR + AGENTES
     # =====================================================================
 
+    def _puerto_disponible(self, host: str, puerto: int, tipo: str) -> bool:
+        """Comprueba si se puede asociar (bind) un puerto local."""
+        familia = socket.SOCK_STREAM if tipo == "tcp" else socket.SOCK_DGRAM
+        s = socket.socket(socket.AF_INET, familia)
+        try:
+            s.bind((host, puerto))
+            return True
+        except OSError:
+            return False
+        finally:
+            s.close()
+
+    def _siguiente_puerto_libre(self, inicio: int, tipo: str, host: str = "127.0.0.1") -> int:
+        """Devuelve el primer puerto libre >= inicio (avisa si hubo que moverse)."""
+        puerto = inicio
+        while puerto < 65535 and not self._puerto_disponible(host, puerto, tipo):
+            puerto += 1
+        if puerto != inicio:
+            self._registrar("Sistema", f"Puerto {tipo.upper()} {inicio} ocupado: se usará {puerto}.", "sys")
+        return puerto
+
+    def _puertos_tcp_libres(self, cantidad: int, desde: int) -> list:
+        """Reserva `cantidad` puertos TCP libres y distintos a partir de `desde`."""
+        puertos = []
+        candidato = desde
+        while len(puertos) < cantidad and candidato < 65535:
+            if self._puerto_disponible("127.0.0.1", candidato, "tcp"):
+                puertos.append(candidato)
+            candidato += 1
+        return puertos
+
     def iniciar_demo(self):
         """
         Levanta el servidor y N agentes como procesos hijo, y conecta el dashboard.
@@ -740,6 +1012,12 @@ class SDMRMonitorGUI:
         except ValueError:
             cantidad = 3
 
+        # §6 del TP: manejo de "puerto ocupado". Si el puerto pedido está en uso
+        # (por ejemplo, ya hay un SDMR corriendo), se avanza al siguiente libre
+        # en vez de fallar al lanzar el servidor.
+        puerto_udp = self._siguiente_puerto_libre(puerto_udp, "udp", self.entrada_host.get().strip() or "127.0.0.1")
+        puerto_tcp = self._siguiente_puerto_libre(puerto_tcp, "tcp", self.entrada_host.get().strip() or "127.0.0.1")
+
         # ttk.Entry no tiene .set(): hay que borrar e insertar.
         for entrada, valor in (
             (self.entrada_host, "127.0.0.1"),
@@ -748,6 +1026,10 @@ class SDMRMonitorGUI:
         ):
             entrada.delete(0, "end")
             entrada.insert(0, valor)
+
+        # Puerto TCP de control (EXEC) para cada agente: deben ser distintos
+        # porque todos corren en la misma máquina durante la demo.
+        puertos_cmd = self._puertos_tcp_libres(cantidad, DEFAULT_AGENT_TCP_PORT)
 
         # Bandera para no abrir una ventana de consola por cada proceso hijo.
         sin_consola = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -766,12 +1048,13 @@ class SDMRMonitorGUI:
         # Pequeña pausa para que el servidor abra los sockets antes que los agentes.
         time.sleep(1.0)
 
-        # 2. Agentes de monitoreo
+        # 2. Agentes de monitoreo (cada uno con su canal de comandos EXEC)
         for indice in range(1, cantidad + 1):
             nombre = f"NODO_{indice:02d}"
-            self._registrar("Sistema", f"Iniciando agente {nombre}...", "sys")
+            cmd_port = puertos_cmd[indice - 1]
+            self._registrar("Sistema", f"Iniciando agente {nombre} (EXEC TCP {cmd_port})...", "sys")
             agente = subprocess.Popen(
-                [sys.executable, "-u", ruta_agente, nombre, "127.0.0.1", str(puerto_udp)],
+                [sys.executable, "-u", ruta_agente, nombre, "127.0.0.1", str(puerto_udp), str(cmd_port)],
                 cwd=raiz, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 encoding=ENCODING, errors="replace", bufsize=1,
                 creationflags=sin_consola,
@@ -916,8 +1199,26 @@ class SDMRMonitorGUI:
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Dashboard SDMR (cliente NETMON/1.0)")
+    parser.add_argument("--demo", action="store_true", help="Levanta servidor + agentes automáticamente al abrir")
+    parser.add_argument("--agentes", type=int, default=None, help="Cantidad de agentes para la demo (1-6)")
+    parser.add_argument("--udp", type=int, default=None, help="Puerto UDP de telemetría")
+    parser.add_argument("--tcp", type=int, default=None, help="Puerto TCP de comandos")
+    parser.add_argument("--host", default=None, help="IP del servidor central")
+    args = parser.parse_args()
+
+    opciones = {
+        "demo": args.demo,
+        "agentes": args.agentes,
+        "udp": args.udp,
+        "tcp": args.tcp,
+        "host": args.host,
+    }
+
     raiz = tk.Tk()
-    dashboard = SDMRMonitorGUI(raiz)
+    dashboard = SDMRMonitorGUI(raiz, opciones)
 
     def _reportar_error(exc, valor, traza):
         """

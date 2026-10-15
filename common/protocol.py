@@ -29,6 +29,7 @@ Estructura de Mensajes:
 
 import json
 import time
+from collections import deque
 
 # Versión del protocolo
 PROTOCOL_VERSION = "NETMON/1.0"
@@ -36,17 +37,23 @@ PROTOCOL_VERSION = "NETMON/1.0"
 # Puertos por defecto asignados para la aplicación
 DEFAULT_UDP_PORT = 5000  # Canal de baja latencia para Telemetría / Heartbeats
 DEFAULT_TCP_PORT = 5001  # Canal confiable para Comandos y Autenticación
+DEFAULT_AGENT_TCP_PORT = 5002  # Canal de control del AGENTE (recibe comandos EXEC)
 
 # Delimitador utilizado para separar campos dentro de los mensajes de texto plano
 DELIMITER = "|"
 ENCODING = "utf-8"
 BUFFER_SIZE = 4096  # Tamaño de búfer para lectura de sockets (bytes)
 
+# Tope de longitud de una única trama TCP. Protege al servidor contra
+# basura que nunca llega con '\n' y haría crecer el búfer sin límite.
+MAX_FRAME_SIZE = 8192
+
 # Codigos de Error Oficiales del Protocolo
 ERR_MALFORMED_REQUEST = "ERR_100"  # Mensaje con formato incorrecto o faltan parámetros
 ERR_UNAUTHORIZED      = "ERR_101"  # Error de autenticación o falta de permisos
 ERR_NODE_NOT_FOUND    = "ERR_102"  # El nodo especificado no existe o está OFFLINE
 ERR_UNKNOWN_COMMAND   = "ERR_103"  # El comando TCP solicitado no es válido
+ERR_NODE_UNREACHABLE  = "ERR_104"  # El nodo no respondió o no soporta el comando EXEC
 ERR_INTERNAL_SERVER   = "ERR_500"  # Error interno del servidor
 
 
@@ -77,19 +84,29 @@ def decode_message(raw_bytes: bytes) -> str:
 # FUNCIONES PARA MENSAJES UDP (TELEMETRÍA DE NODOS)
 # =============================================================================
 
-def build_udp_telemetry(node_id: str, ip: str, cpu: float, ram: float, disk: float, status: str = "OK") -> str:
+def build_udp_telemetry(node_id: str, ip: str, cpu: float, ram: float, disk: float, status: str = "OK", cmd_port: int = None) -> str:
     """
     Construye la trama de texto para un reporte de telemetría por UDP.
-    
-    Formato: MON|<node_id>|<ip>|<cpu>|<ram>|<disk>|<status>
+
+    Formato: MON|<node_id>|<ip>|<cpu>|<ram>|<disk>|<status>[|<cmd_port>]
+
+    El último campo `cmd_port` es OPCIONAL: indica el puerto TCP donde el
+    agente escucha comandos EXEC. Se incluye solo si el agente tiene ese
+    canal habilitado (permite que el servidor reenvíe comandos remotos).
     """
-    return f"MON{DELIMITER}{node_id}{DELIMITER}{ip}{DELIMITER}{cpu:.1f}{DELIMITER}{ram:.1f}{DELIMITER}{disk:.1f}{DELIMITER}{status}"
+    trama = f"MON{DELIMITER}{node_id}{DELIMITER}{ip}{DELIMITER}{cpu:.1f}{DELIMITER}{ram:.1f}{DELIMITER}{disk:.1f}{DELIMITER}{status}"
+    if cmd_port is not None:
+        trama += f"{DELIMITER}{int(cmd_port)}"
+    return trama
 
 
 def parse_udp_telemetry(message: str) -> dict:
     """
     Parsea y valida un mensaje de telemetría UDP.
-    
+
+    Acepta 7 campos (formato original) u 8 campos (con puerto de comandos).
+    Valida tipo, rango de métricas y coherencia del puerto.
+
     :param message: Cadena de mensaje recibida por UDP.
     :return: Diccionario con los datos del nodo parseados.
     :raises ValueError: Si el formato o los datos son inválidos.
@@ -100,7 +117,10 @@ def parse_udp_telemetry(message: str) -> dict:
 
     node_id = parts[1].strip()
     ip = parts[2].strip()
-    
+
+    if not node_id:
+        raise ValueError("El ID de nodo no puede estar vacío.")
+
     try:
         cpu = float(parts[3])
         ram = float(parts[4])
@@ -114,6 +134,16 @@ def parse_udp_telemetry(message: str) -> dict:
 
     status = parts[6].strip()
 
+    # Campo OPCIONAL: puerto TCP de comandos del agente (para EXEC remoto)
+    cmd_port = None
+    if len(parts) >= 8 and parts[7].strip():
+        try:
+            cmd_port = int(parts[7])
+        except ValueError:
+            raise ValueError("El puerto de comandos del nodo debe ser un entero.")
+        if not (1 <= cmd_port <= 65535):
+            raise ValueError("El puerto de comandos del nodo debe estar dentro de [1, 65535].")
+
     return {
         "type": "TELEMETRY",
         "node_id": node_id,
@@ -122,6 +152,7 @@ def parse_udp_telemetry(message: str) -> dict:
         "ram": ram,
         "disk": disk,
         "status": status,
+        "cmd_port": cmd_port,
         "timestamp": time.time()
     }
 
@@ -161,6 +192,35 @@ def parse_tcp_command(message: str) -> dict:
     }
 
 
+# =============================================================================
+# MENSAJES DE CONTROL SERVIDOR <-> AGENTE (EXEC REMOTO)
+# =============================================================================
+
+def build_exec_command(comando: str) -> str:
+    """
+    Servidor -> Agente: orden de ejecución remota.
+    Formato: EXECCMD|<COMANDO>
+    """
+    return f"EXECCMD{DELIMITER}{comando}"
+
+
+def parse_exec_command(message: str) -> dict:
+    """
+    Agente: parsea la orden de ejecución recibida del servidor.
+
+    :raises ValueError: Si la cadena no inicia con 'EXECCMD' o no trae comando.
+    """
+    parts = message.split(DELIMITER)
+    if len(parts) < 2 or parts[0] != "EXECCMD":
+        raise ValueError("La orden de ejecución debe iniciar con la cabecera 'EXECCMD'")
+
+    comando = parts[1].strip()
+    if not comando:
+        raise ValueError("La orden de ejecución no incluye un comando.")
+
+    return {"action": "EXEC", "command": comando}
+
+
 def build_tcp_response(status: str, payload_or_code: str, detail: str = "") -> str:
     """
     Construye una respuesta TCP estructurada.
@@ -190,3 +250,92 @@ def parse_tcp_response(message: str) -> dict:
         "payload_or_code": payload_or_code,
         "detail": detail
     }
+
+
+# =============================================================================
+# ENCUADRADO (FRAMING) DE TRAMAS SOBRE TCP
+# =============================================================================
+
+class FrameTooLongError(ValueError):
+    """
+    Señala que una trama TCP superó el tamaño máximo permitido
+    (el emisor nunca envió '\\n' y el búfer crecería sin límite).
+    """
+
+
+class TcpFrameReader:
+    """
+    Acumulador de tramas por conexión TCP.
+
+    TCP es un flujo de bytes, no un transporte de mensajes: `recv()` puede
+    devolver **una trama partida en dos** o **dos tramas juntas en un mismo
+    segmento**. Este separador acumula bytes hasta encontrar '\\n' y entrega
+    tramas completas, evitando que se concatenen comandos o se parseen
+    respuestas truncadas.
+
+    Uso típico (un lector por conexión):
+
+        reader = TcpFrameReader()
+        while True:
+            datos = socket.recv(BUFFER_SIZE)
+            if not datos:
+                break
+            try:
+                reader.feed(datos)
+            except FrameTooLongError:
+                # trama inválida: descartar y responder ERR_100
+                continue
+            while reader.hay_tramas():
+                trama = reader.siguiente_trama()
+                ...
+    """
+
+    def __init__(self, max_frame_size: int = MAX_FRAME_SIZE):
+        # Búfer de bytes crudos: solo se decodifican tramas COMPLETAS, así
+        # nunca se corta una secuencia UTF-8 multibyte por la mitad.
+        self._buffer = b""
+        self._max_frame_size = max_frame_size
+        self._frames = deque()
+
+    def feed(self, data: bytes) -> list:
+        """
+        Añade bytes recibidos desde el socket y separa las tramas completas.
+
+        :param data: Fragmento de bytes recibido con `recv()`.
+        :return: Lista con las tramas completas encontradas en esta tanda.
+        :raises FrameTooLongError: Si el búfer supera el máximo sin '\\n'.
+        """
+        self._buffer += data
+        nuevas = []
+
+        while b"\n" in self._buffer:
+            crudo, self._buffer = self._buffer.split(b"\n", 1)
+            texto = crudo.decode(ENCODING, errors="replace").strip()
+            if texto:  # se ignoran tramas vacías (p. ej. el '\n' final suelto)
+                self._frames.append(texto)
+                nuevas.append(texto)
+
+        if len(self._buffer) > self._max_frame_size:
+            self.reset()
+            raise FrameTooLongError(
+                f"La trama supera el tamaño máximo de {self._max_frame_size} bytes sin incluir '\\n'."
+            )
+
+        return nuevas
+
+    def hay_tramas(self) -> bool:
+        """Indica si hay tramas completas listas para consumir."""
+        return bool(self._frames)
+
+    def siguiente_trama(self) -> str:
+        """
+        Devuelve la siguiente trama completa en orden de llegada.
+
+        :raises IndexError: Si no hay tramas pendientes.
+        """
+        return self._frames.popleft()
+
+    def reset(self):
+        """Descarta el búfer y las tramas pendientes (conexión contaminada)."""
+        self._buffer = b""
+        self._frames.clear()

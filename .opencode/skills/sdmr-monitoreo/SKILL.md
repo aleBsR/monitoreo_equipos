@@ -22,8 +22,8 @@ selectors, ni ningún framework que oculte la capa de transporte. Se menciona
 en `propuesta.md` §2.1 que usar un framework "podría incidir negativamente en la
 evaluación de RF03, RF04 y RF06".
 
-Dependencias externas permitidas y ya declaradas: `psutil` (métricas reales) y
-`rich` (consola). Son opcionales — el agente tiene fallback a simulación.
+Dependencias externas permitidas y ya declaradas: `psutil` (métricas reales,
+opcional — el agente tiene fallback a simulación). `rich` se quitó por no usarse.
 
 ## Arquitectura
 
@@ -31,12 +31,18 @@ Dependencias externas permitidas y ya declaradas: `psutil` (métricas reales) y
 Servidor central (server/server.py)
   ├─ UDP :5000  <- telemetría/heartbeat de agentes   (sin conexión, 3 s)
   ├─ TCP :5001  <- comandos de admins               (conexión, confiable)
-  └─ hilo watchdog  -> marca OFFLINE a los 15 s de inactividad
+  └─ hilo watchdog  -> marca OFFLINE a los 15 s y PURGA a los 120 s
 
 agent/agent.py      -> mide CPU/RAM/Disco, envía MON|... por UDP cada 3 s
+                       + canal TCP de comandos EXEC (puerto 5002+, argv[4])
 client/admin_client.py -> CLI admin: PING, AUTH, GET_NODES, EXEC
-client/gui_monitor.py  -> dashboard Tkinter (3 pestañas: Nodos, Demo, Tráfico)
-common/protocol.py  -> encode/decode/parse compartido por los tres
+client/gui_monitor.py  -> dashboard Tkinter (5 pestañas: Nodos, Demo, Tráfico,
+                          Instrucciones de uso, Conceptos TCP/UDP)
+client/contenido_ayuda.py -> texto plano de las 2 pestañas de ayuda
+                             (INSTRUCCIONES y CONCEPTOS; los conceptos son
+                             citas literales de Kurose 5.ª ed. con cap./pág.)
+common/protocol.py  -> encode/decode/parse + TcpFrameReader compartido
+sdmr / instalar.sh / *.bat -> lanzadores (un comando abre todo)
 ```
 
 `gui_monitor.py` es un cliente **adicional**, no un reemplazo: habla el mismo
@@ -51,8 +57,9 @@ pestaña "Demo". Restricciones propias de Tkinter:
   `time.strftime("%H:%M:%S", time.localtime(ts))`.
 - Los procesos hijo se lanzan con `CREATE_NO_WINDOW` y `-u` (sin buffer) para
   que no abran consolas ni retrasen la salida.
-- `_leer_linea()` en la GUI **sí** acumula hasta `\n` (corrige el bug del punto 1
-  de abajo). No reintroducir un `recv()` único aquí.
+- `_leer_linea()` en la GUI acumula hasta `\n`. El servidor y `admin_client.py`
+  usan `TcpFrameReader` (en `protocol.py`) para lo mismo. No reintroducir un
+  `recv()` único sin acumulador.
 - Los hijos de `popen` no se cierran solos: sin `try/finally` en los scripts de
   prueba quedan servidores huérfanos ocupando el puerto.
 
@@ -65,25 +72,41 @@ Texto plano, delimitador `|`, framing por `\n`, encoding UTF-8.
 
 | Dirección | Formato |
 | --- | --- |
-| UDP telemetría | `MON\|<ID_NODO>\|<IP>\|<CPU>\|<RAM>\|<DISK>\|<STATUS>` |
+| UDP telemetría | `MON\|<ID_NODO>\|<IP>\|<CPU>\|<RAM>\|<DISK>\|<STATUS>[\|<PUERTO_CMD>]` |
 | TCP solicitud | `CMD\|<ACCION>\|<PARAM>\|...` |
 | TCP respuesta | `RES\|<OK\|ERR>\|<PAYLOAD_O_CODIGO>\|<DETALLE>` |
+| TCP servidor->agente (EXEC) | `EXECCMD\|<COMANDO>` |
 
 Acciones TCP: `PING` (sin auth), `AUTH`, `GET_NODES`, `EXEC`.
 
+El campo `PUERTO_CMD` de la telemetría UDP es **opcional** (7 u 8 campos): es el
+puerto TCP donde el agente escucha `EXECCMD`. `parse_udp_telemetry` valida ambos.
+
 Códigos de error: `ERR_100` malformado · `ERR_101` no autenticado ·
 `ERR_102` nodo inexistente/OFFLINE · `ERR_103` comando desconocido ·
-`ERR_500` error interno (definido en `protocol.py:50`, nunca emitido).
+`ERR_104` nodo inalcanzable / comando no soportado por el agente ·
+`ERR_500` error interno (definido en `protocol.py`, nunca emitido).
 
 El payload de `GET_NODES` usa `;` entre nodos y `:` entre campos
 (`NODES_COUNT:2;NODO_01:IP:STATUS:CPU=x:RAM=y:DISK=z`), **no** `|`.
 
-Credenciales: `admin`/`admin123`, `operador`/`operador123` (server.py:73).
+Credenciales: `admin`/`admin123`, `operador`/`operador123` (server.py).
+
+### EXEC real (extremo a extremo)
+El servidor conecta por TCP al `PUERTO_CMD` del nodo (timeout 3 s), envía
+`EXECCMD|<COMANDO>` y devuelve la respuesta real del agente. Comandos permitidos
+en el agente (`agent/agent.py`): `RESTART_SERVICE`, `DIAGNOSTIC`, `CLEAR_LOGS`;
+cualquier otro -> `ERR_104` y queda rechazado. Cada orden se registra en
+`agent/historial_comandos.log` (ignorado por `.gitignore`).
 
 ## Dónde tocar las cosas
 
 - Cualquier cambio al protocolo debe hacerse en `common/protocol.py` y
   reflejarse en los tres consumidores a la vez.
+- La ayuda de la GUI (pestañas "Instrucciones de uso" y "Conceptos TCP/UDP")
+  se edita en `client/contenido_ayuda.py`, nunca dentro de `gui_monitor.py`.
+  Los textos de `CONCEPTOS` son citas literales del PDF de Kurose: no
+  parafrasearlos ni "mejorarlos". Las pestañas de ayuda no abren sockets.
 - `sys.path.append(os.path.join(os.path.dirname(__file__), ".."))` al inicio de
   cada entrypoint — es lo que permite `from common.protocol import ...` cuando
   se ejecuta `python server/server.py` desde la raíz.
@@ -94,51 +117,60 @@ Credenciales: `admin`/`admin123`, `operador`/`operador123` (server.py:73).
 ## Comandos
 
 ```bash
-python server/server.py [udp_port] [tcp_port]
-python agent/agent.py <ID_NODO> <IP_SERVIDOR> [PUERTO_UDP]
+python server/server.py [udp_port] [tcp_port] [segundos_purga_offline]
+python agent/agent.py <ID_NODO> <IP_SERVIDOR> [PUERTO_UDP] [PUERTO_CMD_TCP]
 python client/admin_client.py <IP_SERVIDOR> [PUERTO_TCP]
-python client/gui_monitor.py    # dashboard; usar puertos libres si hay otros
-python test_system.py            # integración: 3 agentes + 1 admin
+python client/gui_monitor.py [--demo] [--agentes N] [--udp P] [--tcp P] [--host IP]
+
+# Lanzadores: un comando abre dashboard + servidor + agentes
+./instalar.sh        # Linux: crea el comando global 'sdmr' (+ tkinter/psutil)
+sdmr                 # Linux: abre todo en modo demo
+iniciar_sdmr.bat     # Windows: doble clic (crear_acceso_directo.bat crea el .lnk)
+
+python test_system.py   # 8 pruebas del TP + EXEC, todo no interactivo
 ```
 
-Filtros de Wireshark para la defensa: `tcp.port == 5001`, `udp.port == 5000`.
+Filtros de Wireshark para la defensa: `tcp.port == 5001`, `udp.port == 5000`,
+y `tcp.port == 5002` para ver el `EXECCMD` hacia el agente.
 
-## Bugs conocidos — no reintroducirlos
+## Bugs ya corregidos (no reintroducir)
 
-1. **Encuadrado TCP roto.** `server.py:227` y `admin_client.py:96` hacen un
-   único `recv(BUFFER_SIZE)` sin acumular hasta `\n`. Dos comandos en el mismo
-   segmento se concatenan; uno fragmentado se parsea truncado. Si se toca el
-   transporte, arreglar con un buffer acumulador por conexión.
-2. **`test_system.py:72` cuelga.** Llama a `client.send_malformed_test()`, que
-   es interactiva (`input()` en `admin_client.py:184`). El test "automatizado"
-   del README se bloquea esperando teclado.
-3. **`EXEC` es un stub.** `server.py:323` devuelve `EXEC_SUCCESS` sin ejecutar
-   nada. El agente no escucha por TCP, aunque `propuesta.md:69` lo exige.
-4. **Faltan las alertas al admin** (propuesta §1) — no implementado.
-5. **Watchdog no purga nodos** — `nodes_registry` crece sin límite.
-6. **`propuesta.md` y `propuesta_tpi.md` son idénticos** (mismo hash). El
-   README referencia el segundo; no crear un tercero.
-7. **Doc desalineada con el código:** `propuesta.md:98-104` describe respuestas
-   con `|` y un `<TOKEN>` de auth que el código no emite. El README sí
-   refleja el código real.
+1. **Encuadrado TCP.** Servidor y `admin_client.py` usan `TcpFrameReader`:
+   acumula hasta `\n`, soporta tramas partidas y varias en un segmento.
+   `test_system.py` prueba ambos casos.
+2. **`send_malformed_test` ya no cuelga el test.** Acepta `sub_opt` para modo
+   no interactivo; `test_system.py` corre de punta a punta sin teclado.
+3. **`EXEC` es real.** Servidor -> agente por TCP (`EXECCMD`), el agente valida
+   contra lista permitida y responde. `ERR_104` si no hay canal o no soporta.
+4. **Watchdog purga:** borra los nodos OFFLINE tras `offline_purge_seconds`
+   (120 s por defecto, 3er argumento del servidor). `nodes_registry` no crece.
+5. **Puerto ocupado:** el servidor detecta `EADDRINUSE` y sale con mensaje
+   claro; la demo de la GUI avanza al siguiente puerto libre.
+
+## Pendiente / no implementado
+
+- **Alertas al admin** (propuesta §1): cuando un nodo pasa a OFFLINE el
+  servidor solo lo loguea; no notifica por TCP a los admins conectados.
+- `TODO` accesorio: `propuesta.md` describe respuestas con `|` y un `<TOKEN>`
+  de auth que el código no emite. El README refleja el código real.
 
 ## Higiene del repo
 
-- **No existe `.gitignore` y los `__pycache__/*.pyc` están versionados.**
-  Crear `.gitignore` con `__pycache__/`, `*.pyc` antes de añadir archivos.
+- `.gitignore` ya existe (`__pycache__/`, `*.pyc`, `*.log`). Los `.pyc` viejos
+  siguen versionados; limpiar con `git rm -r --cached` si se pide.
 - Hay binarios pesados versionados: el PDF de Kurose (12.6 MB) y
   `Capitulo2.v2.ppt` (2.6 MB). No versionar PDFs nuevos.
-- El badge del README enlaza a `LICENSE` (MIT) pero **el archivo no existe**.
-- `README.md:9` tiene texto de una prueba de commit: "Estoy probando como
-  funciona el commit". Limpiar.
-- `requirements.txt` tiene mojibake: dice "mǸtricas" en vez de "métricas".
+- `LICENSE` (MIT) ya existe y coincide con el badge del README.
+- `requirements.txt` ya está sin mojibake ni `rich` (solo `psutil`).
 - No hay linter ni formateador configurado. No agregar dependencias de build.
 
 ## Detalles de implementación que conviene respetar
 
-- `parse_udp_telemetry` valida rango `[0, 100]` en CPU/RAM/Disco y lanza
-  `ValueError`; el servidor lo captura y **no** cierra la conexión. Ese
-  comportamiento de tolerancia es requisito explícito (RF07).
+- `parse_udp_telemetry` valida rango `[0, 100]` en CPU/RAM/Disco, acepta 7 u 8
+  campos y lanza `ValueError`; el servidor lo captura y **no** cierra la
+  conexión. Ese comportamiento de tolerancia es requisito explícito (RF07).
+- Si el agente no puede abrir su puerto de comandos (ocupado), sigue enviando
+  telemetría con `cmd_port=None`; el servidor responde `ERR_104` en `EXEC`.
 - El agente marca `WARNING` si `cpu > 80` o `ram > 85`; el disco no participa
   del umbral.
 - El watchdog corre cada 5 s con timeout de 15 s. Al volver la telemetría, el
