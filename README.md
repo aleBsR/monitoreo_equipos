@@ -116,6 +116,9 @@ juntos. Servidor, cliente y agente separan las tramas con un acumulador común
 ├── instalar.sh              # Instalador Linux (crea el comando 'sdmr' y el acceso de menú)
 ├── iniciar_sdmr.bat         # Lanzador Windows (doble clic)
 ├── crear_acceso_directo.bat # Crea el acceso directo del Escritorio en Windows
+├── agente_remoto.sh         # Lanzador Linux: agente apuntando a otro equipo (red local)
+├── agente_remoto.bat        # Lanzador Windows: agente apuntando a otro equipo (red local)
+├── verificar_red.py         # Diagnóstico de conectividad TCP/UDP hacia el servidor
 ├── requirements.txt         # Dependencia opcional (psutil)
 ├── test_system.py           # Pruebas de integración automatizadas
 └── propuesta_tpi.md         # Documentación de diseño y arquitectura
@@ -193,6 +196,108 @@ python3 client/admin_client.py 127.0.0.1 5001
 
 ---
 
+## 🌐 Prueba en 2+ equipos (red local)
+
+El TP pide que la aplicación **se ejecute en al menos dos equipos o máquinas
+virtuales conectadas en red** (§11). La arquitectura ya lo soporta: el servidor
+escucha en `0.0.0.0` (todas las interfaces) y tanto los agentes como los
+clientes reciben la IP del servidor como parámetro. Los pasos son los mismos
+que en modo manual, cambiando `127.0.0.1` por la **IP de la red local del
+equipo servidor**.
+
+### 1. Averiguar la IP del equipo servidor
+
+**Linux:**
+```bash
+hostname -I            # muestra la IP de la LAN (ej. 192.168.1.50)
+```
+**Windows:**
+```bat
+ipconfig               # buscar "Dirección IPv4" de la interfaz activa
+```
+
+> Ejemplo para el resto de la guía: el servidor tiene la IP **192.168.1.50**.
+
+### 2. En el equipo SERVIDOR: abrir los puertos en el firewall
+
+| Puerto | Protocolo | Para qué |
+| :--- | :--- | :--- |
+| `5000` | UDP | Telemetría / heartbeat de los agentes |
+| `5001` | TCP | Comandos y autenticación de administradores |
+| `5002+` | TCP | Canal `EXEC` de cada agente (en el equipo del agente) |
+
+```bash
+# Linux (ufw)
+sudo ufw allow 5000/udp
+sudo ufw allow 5001/tcp
+sudo ufw allow 5002/tcp
+```
+```bat
+REM Windows (PowerShell/CMD como Administrador)
+netsh advfirewall firewall add rule name="SDMR UDP" dir=in action=allow protocol=UDP localport=5000
+netsh advfirewall firewall add rule name="SDMR TCP" dir=in action=allow protocol=TCP localport=5001
+netsh advfirewall firewall add rule name="SDMR EXEC" dir=in action=allow protocol=TCP localport=5002
+```
+
+### 3. En el equipo SERVIDOR: iniciar el servidor
+
+```bash
+python3 server/server.py
+```
+(o el lanzador gráfico `sdmr`, cuya pestaña Demo también escucha en todas las
+interfaces y por lo tanto ve a los agentes remotos).
+
+### 4. En cada OTRO equipo: iniciar un agente apuntando al servidor
+
+La forma más simple, con los lanzadores incluidos:
+
+**Linux:**
+```bash
+./agente_remoto.sh 192.168.1.50 NODO_02
+```
+**Windows:**
+```bat
+agente_remoto.bat 192.168.1.50 NODO_02
+```
+El ID de nodo es opcional (por defecto usa el hostname del equipo); el puerto
+UDP por defecto es `5000` y el del canal `EXEC` es `5002`. Sintaxis completa:
+`<IP_SERVIDOR> [ID_NODO] [PUERTO_UDP] [PUERTO_CMD]`.
+
+Si preferís el comando manual, es el mismo de siempre pero con la IP del
+servidor:
+```bash
+python3 agent/agent.py NODO_02 192.168.1.50 5000 5002
+```
+> **Nota:** un puerto de comandos distinto por agente (5002, 5003, …) solo es
+> necesario cuando **varios agentes corren en el mismo equipo**. Si cada agente
+> vive en una máquina distinta, todos pueden usar el `5002`.
+
+### 5. Verificar la conectividad (opcional pero recomendado)
+
+Desde cualquier equipo, antes o durante la demo:
+```bash
+python3 verificar_red.py 192.168.1.50
+```
+Comprueba el `PING` TCP, envía una telemetría UDP de prueba y confirma que el
+servidor la registró. Si algo falla, indica si el problema es la IP o el
+firewall, y sugiere las reglas a abrir.
+
+### 6. En otro equipo: administrar con el cliente o el dashboard
+
+```bash
+# Consola CLI
+python3 client/admin_client.py 192.168.1.50 5001
+
+# Dashboard gráfico (escribir 192.168.1.50 en el campo "Servidor")
+python3 client/gui_monitor.py
+```
+
+> En una captura con Wireshark vas a ver que las IP de origen de cada agente
+> son las **de su propia máquina** (no `127.0.0.1`), y el `EXEC` sale del
+> servidor hacia esa IP en el puerto de comandos del agente.
+
+---
+
 ## 🖥️ Interfaz Gráfica (Dashboard Tkinter)
 
 Para mostrar el proyecto de forma visual, existe un dashboard construido con
@@ -263,6 +368,12 @@ si todo pasó.
 Para inspeccionar el tráfico generado durante la evaluación:
 * **Filtro TCP:** `tcp.port == 5001` (Muestra el Handshake `SYN`, `SYN-ACK`, `ACK`, envío de comandos y cierre `FIN`).
 * **Filtro UDP:** `udp.port == 5000` (Muestra la ráfaga continua de datagramas de telemetría).
+* **Filtro EXEC:** `tcp.port == 5002` (la orden `EXECCMD|...` que el servidor envía al agente).
+
+En una prueba entre 2+ equipos conviene documentar la IP de origen y destino de
+cada paquete (sección §9 del TP): la telemetría UDP lleva como origen la IP de
+la LAN del agente y como destino la IP del servidor, y el `EXEC` hace el camino
+inverso.
 
 ---
 

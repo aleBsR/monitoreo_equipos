@@ -48,7 +48,10 @@ INSTRUCCIONES = [{'titulo': '1. Inicio rápido (todo con un comando)',
            '   Cada agente necesita un puerto de comandos distinto (5002, 5003, ...).\n'
            '\n'
            '3) Cliente:\n'
-           '       python3 client/admin_client.py 127.0.0.1 5001'},
+           '       python3 client/admin_client.py 127.0.0.1 5001\n'
+           '\n'
+           'Para ejecutar en varios equipos de la red, cambiá 127.0.0.1 por la IP LAN\n'
+           "del servidor (ver '9. Probar en varios equipos')."},
  {'titulo': '3. Conectar desde esta ventana',
   'texto': 'Barra superior:\n'
            '  • Servidor / Puerto TCP / Puerto UDP: datos del servidor central.\n'
@@ -112,7 +115,41 @@ INSTRUCCIONES = [{'titulo': '1. Inicio rápido (todo con un comando)',
            '  purga del registro a los 120 s.\n'
            '• ERR_104 en EXEC -> el agente no tiene abierto su puerto de comandos o el\n'
            '  comando no está en la lista permitida.\n'
-           "• La GUI no refresca -> tildar 'Auto-actualizar' o pulsar 'Actualizar ahora'."}]
+           "• La GUI no refresca -> tildar 'Auto-actualizar' o pulsar 'Actualizar ahora'."},
+ {'titulo': '9. Probar en varios equipos (red local)',
+  'texto': 'El TP pide ejecutar la aplicación en al menos dos equipos conectados en red.\n'
+           'El servidor escucha en 0.0.0.0, así que basta con reemplazar 127.0.0.1 por\n'
+           'la IP de la LAN del equipo servidor.\n'
+           '\n'
+           '1) En el SERVIDOR, averiguar su IP:  hostname -I  (Linux)  /  ipconfig\n'
+           '   (Windows). Ejemplo: 192.168.1.50.\n'
+           '\n'
+           '2) En el SERVIDOR, abrir el firewall: UDP 5000, TCP 5001 y TCP 5002.\n'
+           '       sudo ufw allow 5000/udp && sudo ufw allow 5001/tcp\n'
+           '       sudo ufw allow 5002/tcp\n'
+           '\n'
+           '3) En el SERVIDOR:  python3 server/server.py\n'
+           '\n'
+           '4) En cada OTRO equipo, un agente apuntando al servidor:\n'
+           '       ./agente_remoto.sh 192.168.1.50 NODO_02      (Linux)\n'
+           '       agente_remoto.bat  192.168.1.50 NODO_02      (Windows)\n'
+           '   Sintaxis: <IP_SERVIDOR> [ID_NODO] [PUERTO_UDP] [PUERTO_CMD]\n'
+           '   Un puerto de comandos distinto por agente solo hace falta si varios\n'
+           '   agentes corren en el MISMO equipo; en equipos distintos todos pueden\n'
+           '   usar el 5002.\n'
+           '\n'
+           '5) Verificar la conexión desde cualquier equipo:\n'
+           '       python3 verificar_red.py 192.168.1.50\n'
+           '   Prueba el PING TCP y una telemetría UDP, e informa si falla la IP o el\n'
+           '   firewall.\n'
+           '\n'
+           '6) Administrar desde otro equipo:  python3 client/admin_client.py\n'
+           '   192.168.1.50 5001  (o el dashboard, escribiendo 192.168.1.50 en el\n'
+           "   campo 'Servidor').\n"
+           '\n'
+           'Nota: la pestaña Demo Local levanta todo con 127.0.0.1 en ESTE equipo.\n'
+           'Para la prueba multi-equipo usá el modo manual de este punto o el\n'
+           'lanzador de agente remoto.'}]
 
 CONCEPTOS = [{'titulo': 'Protocolo',
   'fuente': 'Capítulo 1 · página 9',

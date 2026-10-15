@@ -112,6 +112,33 @@ class SystemNodeAgent:
     # CANAL DE COMANDOS (TCP / EXEC)
     # -------------------------------------------------------------------------
 
+    def _detectar_ip_local(self) -> str:
+        """
+        Devuelve la IP de la interfaz local que realmente se usa para llegar
+        al servidor (no necesariamente la del hostname).
+
+        Se abre un socket UDP y se hace connect() hacia el servidor: no se
+        envía un solo byte, solo se deja que el sistema elija la interfaz de
+        salida y luego se lee la IP asignada con getsockname(). Con esto el
+        campo IP de la telemetría coincide con la IP vista por el servidor,
+        que es la que se usa para reenviar los EXEC.
+
+        :return: Cadena con la IP local, o "127.0.0.1" si no se puede resolver.
+        """
+        s = None
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect((self.server_host, self.server_udp_port))
+            return s.getsockname()[0]
+        except OSError:
+            return "127.0.0.1"
+        finally:
+            if s is not None:
+                try:
+                    s.close()
+                except OSError:
+                    pass
+
     def _log_comando(self, comando: str, resultado: str):
         """Registra en consola y en archivo cada comando administrativo recibido."""
         marca = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -206,10 +233,15 @@ class SystemNodeAgent:
     def start(self):
         """Inicia el canal de comandos TCP y el bucle de telemetría UDP periódica."""
         self.is_running = True
+
+        # IP de la interfaz que realmente llega al servidor (o 127.0.0.1)
+        local_ip = self._detectar_ip_local()
+
         print("=================================================================")
         print(f" INICIANDO AGENTE DE MONITOREO - ID: '{self.node_id}'")
         print("=================================================================")
         print(f"Destino del Servidor UDP: {self.server_host}:{self.server_udp_port}")
+        print(f"IP local de este equipo: {local_ip}")
         print(f"Frecuencia de envío: Cada {self.interval} segundos")
         print(f"Uso de métricas reales (psutil): {'SÍ' if HAS_PSUTIL else 'NO (Simuladas)'}")
         print("-----------------------------------------------------------------")
@@ -221,12 +253,6 @@ class SystemNodeAgent:
         self._iniciar_canal_comandos()
 
         try:
-            # Obtener la IP local del equipo (o usar 127.0.0.1)
-            try:
-                local_ip = socket.gethostbyname(socket.gethostname())
-            except Exception:
-                local_ip = "127.0.0.1"
-
             while self.is_running:
                 # 1. Medir recursos
                 cpu, ram, disk = self.get_system_metrics()
