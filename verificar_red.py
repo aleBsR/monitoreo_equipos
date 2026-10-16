@@ -160,24 +160,55 @@ def probar_udp(host: str, puerto: int, puerto_tcp: int, ip_local: str, timeout: 
         sock.close()
 
 
-def sugerencias_firewall(host: str, puerto_udp: int, puerto_tcp: int):
+def probar_ws(host: str, puerto_ws: int, timeout: float = 5.0) -> tuple:
+    """
+    Verifica el gateway WS->TCP (puerto 5003) que usan React web y Expo Go.
+    Envia CMD|PING por WebSocket y espera RES|OK|PONG del servidor central.
+    """
+    try:
+        import asyncio
+        import websockets
+    except ImportError:
+        return False, "Falta 'websockets' (pip install websockets) para probar el gateway."
+    from common.protocol import parse_tcp_response as _parse
+
+    async def _check():
+        async with websockets.connect(f"ws://{host}:{puerto_ws}", open_timeout=timeout) as ws:
+            await ws.send("CMD|PING")
+            resp = await asyncio.wait_for(ws.recv(), timeout)
+            r = _parse(str(resp).strip())
+            if r["status"] == "OK" and r["payload_or_code"] == "PONG":
+                return True, f"Gateway WS vivo en {host}:{puerto_ws} (reenvia al TCP 5001)."
+            return False, f"Gateway respondio algo raro: {resp}"
+
+    try:
+        import asyncio as _aio
+        return _aio.run(_check())
+    except Exception as e:
+        return False, f"No hay gateway WS en {host}:{puerto_ws}: {e}. Corre server/gateway.py?"
+
+
+def sugerencias_firewall(host: str, puerto_udp: int, puerto_tcp: int, puerto_ws: int = 5003):
     """Imprime recordatorios de apertura de puertos para el servidor."""
     print("\n  Recordá abrir en el EQUIPO SERVIDOR:")
-    print(f"    Linux:   sudo ufw allow {puerto_udp}/udp && sudo ufw allow {puerto_tcp}/tcp")
+    print(f"    Linux:   sudo ufw allow {puerto_udp}/udp && sudo ufw allow {puerto_tcp}/tcp && sudo ufw allow {puerto_ws}/tcp")
     print("             sudo ufw allow 5002/tcp   (canal EXEC del agente)")
     print(f"    Windows: netsh advfirewall firewall add rule name=\"SDMR UDP\" dir=in action=allow protocol=UDP localport={puerto_udp}")
     print(f"             netsh advfirewall firewall add rule name=\"SDMR TCP\" dir=in action=allow protocol=TCP localport={puerto_tcp}")
+    print(f"             netsh advfirewall firewall add rule name=\"SDMR WS\" dir=in action=allow protocol=TCP localport={puerto_ws}")
 
 
 def main():
     if len(sys.argv) < 2:
-        print("Uso: python3 verificar_red.py <IP_SERVIDOR> [PUERTO_UDP] [PUERTO_TCP]")
+        print("Uso: python3 verificar_red.py <IP_SERVIDOR> [PUERTO_UDP] [PUERTO_TCP] [PUERTO_WS]")
         print("Ejemplo: python3 verificar_red.py 192.168.1.50")
+        print("Ejemplo: python3 verificar_red.py 192.168.43.10 5000 5001 5003")
         sys.exit(2)
 
     host = sys.argv[1]
     puerto_udp = int(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_UDP_PORT
     puerto_tcp = int(sys.argv[3]) if len(sys.argv) > 3 else DEFAULT_TCP_PORT
+    puerto_ws = int(sys.argv[4]) if len(sys.argv) > 4 else 5003
 
     print("=================================================================")
     print(" VERIFICACIÓN DE RED SDMR")
@@ -185,6 +216,7 @@ def main():
     print(f" Servidor objetivo : {host}")
     print(f" Puerto UDP        : {puerto_udp}")
     print(f" Puerto TCP        : {puerto_tcp}")
+    print(f" Puerto WS         : {puerto_ws} (gateway React/Expo)")
 
     ip_local = detectar_ip_local(host, puerto_udp)
     print(f" IP local de salida: {ip_local}")
@@ -192,7 +224,7 @@ def main():
     print("-----------------------------------------------------------------")
 
     # 1. Camino TCP
-    print("[1/2] Probando TCP (comandos) ...")
+    print("[1/3] Probando TCP (comandos) ...")
     ok_tcp, detalle_tcp = probar_tcp(host, puerto_tcp)
     print(f"      {'OK  ' if ok_tcp else 'FALLA'}: {detalle_tcp}")
 
@@ -200,14 +232,25 @@ def main():
     ok_udp = False
     detalle_udp = "Omitido: primero hay que resolver el camino TCP."
     if ok_tcp:
-        print("[2/2] Probando UDP (telemetría) ...")
+        print("[2/3] Probando UDP (telemetría) ...")
         ok_udp, detalle_udp = probar_udp(host, puerto_udp, puerto_tcp, ip_local)
         print(f"      {'OK  ' if ok_udp else 'FALLA'}: {detalle_udp}")
 
+    # 3. Camino WS (gateway para React web y Expo Go)
+    print("[3/3] Probando WS (gateway React/Expo) ...")
+    ok_ws, detalle_ws = probar_ws(host, puerto_ws)
+    print(f"      {'OK  ' if ok_ws else 'FALLA'}: {detalle_ws}")
+
     print("-----------------------------------------------------------------")
+    if ok_tcp and ok_udp and ok_ws:
+        print(" RESULTADO: Todo listo. Web, movil y telemetria funcionan.")
+        print(f"   Web:    http://{host}:5173  (gateway ws://{host}:{puerto_ws})")
+        print(f"   Movil:  Expo Go -> ws://{host}:{puerto_ws}")
+        print("=================================================================")
+        sys.exit(0)
     if ok_tcp and ok_udp:
-        print(" RESULTADO: Todo listo. Este equipo puede monitorear al servidor")
-        print(f"            {host} y enviarle telemetría.")
+        print(" RESULTADO parcial: TCP+UDP OK, pero el gateway WS falla.")
+        print("   Corre: python server/gateway.py 5003 127.0.0.1 5001 --serve-web")
         print("=================================================================")
         sys.exit(0)
 
@@ -215,7 +258,7 @@ def main():
     print("   - Que server/server.py esté corriendo en el equipo destino.")
     print(f"   - Que la IP '{host}' sea la del servidor en la red local.")
     print("   - Que ambos equipos estén en la misma red y se hagan ping.")
-    sugerencias_firewall(host, puerto_udp, puerto_tcp)
+    sugerencias_firewall(host, puerto_udp, puerto_tcp, puerto_ws)
     print("=================================================================")
     sys.exit(1)
 

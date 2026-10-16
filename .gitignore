@@ -8,10 +8,22 @@ __pycache__/
 venv/
 env/
 
+# Dependencias Node (se reinstalan con npm install, miles de archivos)
+node_modules/
+
+# Builds generados (se recompilan en cada máquina con npm run build)
+web/dist/
+mobile/dist/
+
 # Archivos de registro generados por los agentes
 *.log
+agent/historial_comandos.log
 
 # Sistema operativo / editores
 .DS_Store
 .idea/
 *.swp
+
+# Expo (estado local del Metro, no commitear)
+.expo/
+mobile/.expo/

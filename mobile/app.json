@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "SDMR",
+    "slug": "sdmr-monitoreo",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "sdmr",
+    "primaryColor": "#E1306C",
+    "icon": "./assets/icon.png",
+    "plugins": [
+      [
+        "expo-splash-screen",
+        { "image": "./assets/splash.png", "resizeMode": "contain", "backgroundColor": "#833AB4" }
+      ]
+    ],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.sdmr.monitoreo"
+    },
+    "plugins": [
+      "expo-status-bar",
+      "expo-splash-screen"
+    ]
+  }
+}

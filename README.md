@@ -103,7 +103,8 @@ juntos. Servidor, cliente y agente separan las tramas con un acumulador común
 │   └── protocol.py          # Definición, codificación, parseo y encuadrado del protocolo NETMON/1.0
 ├── server/
 │   ├── __init__.py
-│   └── server.py            # Servidor concurrente TCP (5001) y UDP (5000) + watchdog
+│   ├── server.py            # Servidor concurrente TCP (5001) y UDP (5000) + watchdog
+│   └── gateway.py           # Puente WS (5003) → TCP (5001) para web y móvil (reenvío transparente NETMON/1.0)
 ├── agent/
 │   ├── __init__.py
 │   └── agent.py             # Agente: telemetría UDP + canal TCP de comandos EXEC
@@ -112,14 +113,20 @@ juntos. Servidor, cliente y agente separan las tramas con un acumulador común
 │   ├── admin_client.py      # Cliente de administración interactivo (CLI)
 │   ├── gui_monitor.py       # Dashboard gráfico (Tkinter) — cliente adicional
 │   └── contenido_ayuda.py   # Texto de las pestañas de ayuda (instrucciones y conceptos)
+├── web/                     # Cliente web React (estilo Instagram) — habla NETMON/1.0 vía gateway WS
+│   ├── package.json         #   src/: App.jsx, lib/netmon.js, styles.css · dist/: build para demo offline
+├── mobile/                  # Cliente móvil React Native (Expo Go) — mismo protocolo vía gateway WS
+│   ├── package.json         #   App.js, netmon.js, index.js, app.json, babel.config.js
 ├── sdmr                     # Lanzador Linux: abre todo con un comando
 ├── instalar.sh              # Instalador Linux (crea el comando 'sdmr' y el acceso de menú)
-├── iniciar_sdmr.bat         # Lanzador Windows (doble clic)
+├── iniciar_sdmr.bat         # Lanzador Windows (doble clic, solo Tkinter)
+├── iniciar_todo.bat         # Lanzador Windows TODO-EN-UNO: servidor + gateway + web + 2 agentes + verificación
+├── iniciar_todo.sh          # Lanzador Linux TODO-EN-UNO (equivalente al .bat)
 ├── crear_acceso_directo.bat # Crea el acceso directo del Escritorio en Windows
 ├── agente_remoto.sh         # Lanzador Linux: agente apuntando a otro equipo (red local)
 ├── agente_remoto.bat        # Lanzador Windows: agente apuntando a otro equipo (red local)
-├── verificar_red.py         # Diagnóstico de conectividad TCP/UDP hacia el servidor
-├── requirements.txt         # Dependencia opcional (psutil)
+├── verificar_red.py         # Diagnóstico de conectividad TCP + UDP + WS (gateway) hacia el servidor
+├── requirements.txt         # psutil (métricas reales) + websockets (gateway)
 ├── test_system.py           # Pruebas de integración automatizadas
 └── propuesta_tpi.md         # Documentación de diseño y arquitectura
 ```
@@ -132,10 +139,12 @@ juntos. Servidor, cliente y agente separan las tramas con un acumulador común
 * **Python 3.8+** instalado.
 * **Tkinter** (interfaz gráfica, parte de la biblioteca estándar). En Linux suele
   requerir el paquete del sistema `python3-tk`.
-* (Opcional) Instalar dependencias para medir recursos reales:
+* Instalar dependencias Python (métricas reales + gateway WS):
   ```bash
   pip install -r requirements.txt
   ```
+* Solo para web/móvil: **Node.js 18+** (`node --version`). La app móvil además
+  necesita **Expo Go** (Play Store) en el celu/tablet.
 
 ---
 
@@ -154,7 +163,9 @@ Opciones: `sdmr --agentes 5`, `sdmr --udp 6000 --tcp 6001`,
 Si preferís no instalar nada global, `./sdmr` funciona igual desde la carpeta.
 
 **Windows:**
-* Doble clic en `iniciar_sdmr.bat`.
+* Doble clic en `iniciar_todo.bat` → **recomendado**: levanta servidor +
+  gateway + web + 2 agentes y verifica la red solo (ver § Orden de encendido).
+* Doble clic en `iniciar_sdmr.bat` → solo dashboard Tkinter en modo Demo.
 * Para tener un ícono en el Escritorio, ejecutá una vez
   `crear_acceso_directo.bat` (crea el acceso directo que apunta al `.bat`).
 
@@ -163,36 +174,156 @@ Si preferís no instalar nada global, `./sdmr` funciona igual desde la carpeta.
 
 ---
 
-### Modo de Uso (Paso a Paso)
+### 📋 Orden de encendido (resumen)
 
-#### 1️⃣ Iniciar el Servidor Central
-Abre una terminal y ejecuta:
-```bash
-python3 server/server.py
-```
-*El servidor comenzará a escuchar en `UDP:5000` y `TCP:5001`.*
+> **Regla de oro:** el **servidor siempre primero**, los clientes después.
+> La app del celu, la web y los dashboards son **clientes**: sin servidor
+> corriendo en la PC muestran "sin conexión".
 
-#### 2️⃣ Iniciar uno o varios Agentes de Monitoreo
-Abre otra terminal para cada agente a monitorear:
-```bash
-# Sintaxis: python3 agent/agent.py <ID_NODO> <IP_SERVIDOR> <PUERTO_UDP> [PUERTO_CMD_TCP]
-python3 agent/agent.py NODO_01 127.0.0.1 5000 5002
-python3 agent/agent.py NODO_02 127.0.0.1 5000 5003
-```
-*El último parámetro es el puerto TCP donde el agente atiende comandos `EXEC`.
-Si se omiten varios agentes en la misma máquina, cada uno necesita un puerto
-distinto (por defecto 5002).*
-
-#### 3️⃣ Iniciar la Consola de Administración (Cliente TCP)
-Abre una nueva terminal:
-```bash
-# Sintaxis: python3 client/admin_client.py <IP_SERVIDOR> <PUERTO_TCP>
-python3 client/admin_client.py 127.0.0.1 5001
-```
+| # | Qué | Archivo / comando | Dónde |
+| :-: | :--- | :--- | :--- |
+| 0 | Preparar red + IP + firewall | `ipconfig` + reglas `netsh`/`ufw` (ver abajo) | PC servidor, una sola vez por red |
+| 1 | Servidor central | `python server/server.py` | PC servidor, terminal 1 |
+| 2 | Gateway WS + web | `python server/gateway.py 5003 127.0.0.1 5001 --serve-web` | PC servidor, terminal 2 |
+| 3 | Agentes (uno por equipo a monitorear) | `python agent/agent.py <ID> <IP_SERVIDOR> 5000 <PUERTO_CMD>` | Cada equipo, una terminal por agente |
+| 4 | Verificación | `python verificar_red.py <IP_SERVIDOR> 5000 5001 5003` | Cualquier equipo (esperar 3/3 OK) |
+| 5 | Clientes a elección | CLI / Tkinter / web / móvil (ver sección Clientes) | Donde corresponda |
 
 **Credenciales de Administrador por defecto:**
 * **Usuario:** `admin` | **Contraseña:** `admin123`
 * **Usuario:** `operador` | **Contraseña:** `operador123`
+
+---
+
+### Modo de Uso detallado (paso a paso)
+
+#### 0️⃣ Preparar la red (una vez por cada red/hotspot)
+
+Todos los equipos (PCs, celus, tablet) deben estar en la **misma red**
+(mismo WiFi o hotspot del celular).
+
+Averiguar la IP del equipo servidor:
+
+**Windows:**
+```bat
+ipconfig               # buscar "Dirección IPv4" de la interfaz activa (ej. 192.168.43.10)
+```
+**Linux:**
+```bash
+hostname -I            # muestra la IP de la LAN (ej. 192.168.1.50)
+```
+
+Abrir los puertos en el equipo SERVIDOR (una sola vez):
+
+```bat
+REM Windows (PowerShell/CMD como Administrador)
+netsh advfirewall firewall add rule name="SDMR UDP" dir=in action=allow protocol=UDP localport=5000
+netsh advfirewall firewall add rule name="SDMR TCP" dir=in action=allow protocol=TCP localport=5001
+netsh advfirewall firewall add rule name="SDMR WS" dir=in action=allow protocol=TCP localport=5003
+netsh advfirewall firewall add rule name="SDMR EXEC" dir=in action=allow protocol=TCP localport=5002,5004
+netsh advfirewall firewall add rule name="Expo Metro" dir=in action=allow protocol=TCP localport=8081
+```
+```bash
+# Linux (ufw)
+sudo ufw allow 5000/udp
+sudo ufw allow 5001/tcp
+sudo ufw allow 5002,5003,5004/tcp
+sudo ufw allow 8081/tcp    # solo si se usa la app móvil con Expo
+```
+
+> En los ejemplos de abajo, `TU_IP` es la IPv4 del servidor
+> (ej. `192.168.43.10`). En la misma PC se usa `127.0.0.1`.
+
+#### 1️⃣ Iniciar el Servidor Central (PRIMERO, siempre)
+Terminal 1 en el equipo servidor:
+```bash
+# Sintaxis: python server/server.py [udp] [tcp]  (por defecto 5000 5001)
+python server/server.py
+```
+*Escucha en `UDP:5000` (telemetría) y `TCP:5001` (comandos). Dejar esta
+terminal abierta: si se cierra, todo lo demás se desconecta.*
+
+#### 2️⃣ Iniciar el Gateway WS + web (SEGUNDO, solo si usarás celu o navegador)
+Terminal 2 en el equipo servidor:
+```bash
+# Sintaxis: python server/gateway.py [ws] [tcp_host] [tcp_port] [--serve-web]
+python server/gateway.py 5003 127.0.0.1 5001 --serve-web
+```
+* Puente **transparente** `WS 5003 → TCP 5001`: reenvía las tramas
+  `NETMON/1.0` tal cual, sin traducir a REST (por eso en Wireshark se sigue
+  viendo el mismo protocolo).
+* Con `--serve-web` además publica la web compilada en
+  `http://TU_IP:5173` (ideal para la defensa sin internet).
+
+#### 3️⃣ Iniciar uno o varios Agentes de Monitoreo (TERCERO)
+Una terminal por cada equipo a monitorear:
+```bash
+# Sintaxis: python agent/agent.py <ID_NODO> <IP_SERVIDOR> <PUERTO_UDP> [PUERTO_CMD_TCP]
+python agent/agent.py NODO_01 127.0.0.1 5000 5002
+python agent/agent.py NODO_02 TU_IP 5000 5004
+```
+*El último parámetro es el puerto TCP donde el agente atiende `EXEC`.
+**Cada agente en la misma máquina necesita un puerto distinto**
+(5002, 5004, …). Si cada agente vive en una máquina distinta, todos pueden
+usar el `5002`. En el otro equipo también sirven los lanzadores
+`agente_remoto.bat TU_IP NODO_02` / `./agente_remoto.sh TU_IP NODO_02`.*
+
+#### 4️⃣ Verificar que todo llega (CUARTO, recomendado)
+Desde cualquier equipo:
+```bash
+# Sintaxis: python verificar_red.py <IP_SERVIDOR> [UDP] [TCP] [WS]
+python verificar_red.py TU_IP 5000 5001 5003
+```
+*Comprueba `[1/3]` PING TCP, `[2/3]` telemetría UDP registrada y
+`[3/3]` gateway WS. Tiene que dar **3/3 OK** antes de abrir los clientes.*
+
+---
+
+### 📱💻 Clientes: cómo correr cada uno (QUINTO, a elección, varios a la vez)
+
+Todos los clientes hablan el mismo protocolo `NETMON/1.0` contra el servidor.
+Se pueden usar **en simultáneo** (CLI + Tkinter + web + 2 celus).
+
+#### A. Consola de administración CLI (sin interfaz, menú de texto)
+```bash
+# Sintaxis: python client/admin_client.py <IP_SERVIDOR> <PUERTO_TCP>
+python client/admin_client.py 127.0.0.1 5001
+```
+*Autenticarse (opción 2), listar nodos (3), EXEC (4), probar tramas
+inválidas RF07 (5). Es el cliente "de referencia" de la materia.*
+
+#### B. Dashboard Tkinter (PC, interfaz original)
+```bash
+python client/gui_monitor.py            # conectar a mano
+python client/gui_monitor.py --demo     # levanta servidor + agentes solo y conecta
+```
+*En red local, escribir `TU_IP` en el campo "Servidor".*
+
+#### C. Web React estilo Instagram (navegador, PC o celu)
+Requiere el gateway del paso 2 en marcha. Si `web/dist/` no existe,
+compilar una vez: `cd web && npm install && npm run build`.
+```bash
+# Abrir en el navegador:
+http://127.0.0.1:5173        # en la misma PC
+http://TU_IP:5173            # desde otro equipo o el celu
+```
+*En el Login, campo **Gateway**: `ws://127.0.0.1:5003` (misma PC) o
+`ws://TU_IP:5003` (red). Usuario `admin` / `admin123`.*
+
+#### D. App móvil con Expo Go (celu/tablet Android)
+Requiere el gateway del paso 2 en marcha y el **puerto 8081 abierto**.
+```bash
+cd mobile
+npm install                  # una sola vez (ya incluye @expo/ngrok local)
+npm run start:tunel          # genera un QR (requiere internet la 1ª vez)
+# o: npm start               # modo LAN, sin túnel, misma red obligatoria
+```
+*Escanear el QR con **Expo Go** (Play Store). En el Login poner
+`ws://TU_IP:5003` (**la IP de la PC, nunca `127.0.0.1`**), `admin` /
+`admin123`. Si Expo pide instalar `@expo/ngrok`, aceptar: ya está fijado
+como dependencia local del proyecto.*
+*Nota: el túnel solo trae la app al celu; el login sigue conectando por
+WiFi local al gateway, así que PC y celu deben estar en la misma red.*
 
 ---
 
@@ -224,19 +355,24 @@ ipconfig               # buscar "Dirección IPv4" de la interfaz activa
 | :--- | :--- | :--- |
 | `5000` | UDP | Telemetría / heartbeat de los agentes |
 | `5001` | TCP | Comandos y autenticación de administradores |
-| `5002+` | TCP | Canal `EXEC` de cada agente (en el equipo del agente) |
+| `5002`, `5004`, … | TCP | Canal `EXEC` de cada agente (en el equipo del agente; evitar el `5003`) |
+| `5003` | TCP | Gateway WS para web y móvil (en el equipo servidor) |
+| `8081` | TCP | Metro de Expo, solo si se usa la app móvil |
+| `5173` | TCP | Web compilada (`--serve-web`), opcional |
 
 ```bash
 # Linux (ufw)
 sudo ufw allow 5000/udp
 sudo ufw allow 5001/tcp
-sudo ufw allow 5002/tcp
+sudo ufw allow 5002,5003,5004/tcp
+sudo ufw allow 5173,8081/tcp   # web + Expo móvil
 ```
 ```bat
 REM Windows (PowerShell/CMD como Administrador)
 netsh advfirewall firewall add rule name="SDMR UDP" dir=in action=allow protocol=UDP localport=5000
 netsh advfirewall firewall add rule name="SDMR TCP" dir=in action=allow protocol=TCP localport=5001
-netsh advfirewall firewall add rule name="SDMR EXEC" dir=in action=allow protocol=TCP localport=5002
+netsh advfirewall firewall add rule name="SDMR WS" dir=in action=allow protocol=TCP localport=5003
+netsh advfirewall firewall add rule name="SDMR EXEC" dir=in action=allow protocol=TCP localport=5002,5004
 ```
 
 ### 3. En el equipo SERVIDOR: iniciar el servidor
@@ -268,18 +404,19 @@ servidor:
 ```bash
 python3 agent/agent.py NODO_02 192.168.1.50 5000 5002
 ```
-> **Nota:** un puerto de comandos distinto por agente (5002, 5003, …) solo es
+> **Nota:** un puerto de comandos distinto por agente (5002, 5004, …) solo es
 > necesario cuando **varios agentes corren en el mismo equipo**. Si cada agente
 > vive en una máquina distinta, todos pueden usar el `5002`.
+> **No usar el `5003`** para agentes: es el puerto del gateway WS.
 
 ### 5. Verificar la conectividad (opcional pero recomendado)
 
 Desde cualquier equipo, antes o durante la demo:
 ```bash
-python3 verificar_red.py 192.168.1.50
+python3 verificar_red.py 192.168.1.50 5000 5001 5003
 ```
-Comprueba el `PING` TCP, envía una telemetría UDP de prueba y confirma que el
-servidor la registró. Si algo falla, indica si el problema es la IP o el
+Comprueba `[1/3]` PING TCP, `[2/3]` telemetría UDP registrada y `[3/3]`
+gateway WS para web/móvil. Si algo falla, indica si el problema es la IP o el
 firewall, y sugiere las reglas a abrir.
 
 ### 6. En otro equipo: administrar con el cliente o el dashboard

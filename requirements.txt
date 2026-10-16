@@ -1,3 +1,6 @@
 # Dependencias opcionales para capturar métricas reales del sistema.
 # El agente funciona sin esto (usa métricas simuladas como fallback).
 psutil>=5.9.0
+# Gateway WS->TCP para clientes React web y React Native (Expo Go).
+# Solo reenvia tramas NETMON/1.0, no cambia el protocolo.
+websockets>=12.0
