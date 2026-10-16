@@ -15,7 +15,7 @@ REM      agente_remoto.bat 192.168.1.50 NODO_02
 REM      agente_remoto.bat 192.168.1.50 NODO_02 5000 5002
 REM ============================================================================
 setlocal
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 if "%~1"=="" goto :uso
 if "%~1"=="-h" goto :uso

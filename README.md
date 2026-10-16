@@ -117,18 +117,21 @@ juntos. Servidor, cliente y agente separan las tramas con un acumulador común
 │   ├── package.json         #   src/: App.jsx, lib/netmon.js, styles.css · dist/: build para demo offline
 ├── mobile/                  # Cliente móvil React Native (Expo Go) — mismo protocolo vía gateway WS
 │   ├── package.json         #   App.js, netmon.js, index.js, app.json, babel.config.js
-├── sdmr                     # Lanzador Linux: abre todo con un comando
-├── instalar.sh              # Instalador Linux (crea el comando 'sdmr' y el acceso de menú)
-├── iniciar_sdmr.bat         # Lanzador Windows (doble clic, solo Tkinter)
-├── iniciar_todo.bat         # Lanzador Windows TODO-EN-UNO: servidor + gateway + web + 2 agentes + verificación
-├── iniciar_todo.sh          # Lanzador Linux TODO-EN-UNO (equivalente al .bat)
-├── crear_acceso_directo.bat # Crea el acceso directo del Escritorio en Windows
-├── agente_remoto.sh         # Lanzador Linux: agente apuntando a otro equipo (red local)
-├── agente_remoto.bat        # Lanzador Windows: agente apuntando a otro equipo (red local)
-├── verificar_red.py         # Diagnóstico de conectividad TCP + UDP + WS (gateway) hacia el servidor
+├── scripts/                 # Lanzadores (doble clic / un comando)
+│   ├── scripts/iniciar_todo.bat     #   Windows TODO-EN-UNO: servidor + gateway + web + 2 agentes + verificación
+│   ├── iniciar_todo.sh      #   Linux TODO-EN-UNO (equivalente al .bat)
+│   ├── scripts/iniciar_sdmr.bat     #   Windows solo Tkinter en modo Demo
+│   ├── scripts/crear_acceso_directo.bat # Acceso directo del Escritorio (Windows)
+│   ├── scripts/agente_remoto.bat / .sh # Agente apuntando a otro equipo (red local)
+│   ├── sdmr                 #   Lanzador Linux: dashboard + demo
+│   └── instalar.sh          #   Instalador Linux (comando global 'sdmr' + menú)
+├── tools/
+│   ├── verificar_red.py     # Diagnóstico TCP + UDP + WS (gateway) hacia el servidor
+│   └── test_system.py       # Pruebas de integración automatizadas
+├── docs/                    # Propuesta, bibliografía (Kurose PDF) y consigna del TP
+│   └── propuesta_tpi.md     #   (propuesta.md, .ppt y .pdf en la misma carpeta)
 ├── requirements.txt         # psutil (métricas reales) + websockets (gateway)
-├── test_system.py           # Pruebas de integración automatizadas
-└── propuesta_tpi.md         # Documentación de diseño y arquitectura
+└── LEEME_OTRA_PC.md         # Guía corta para replicar el entorno en otra PC
 ```
 
 ---
@@ -155,19 +158,19 @@ sin abrir varias terminales.
 
 **Linux (Debian/Ubuntu):**
 ```bash
-./instalar.sh     # una sola vez: instala tkinter/psutil y crea el comando 'sdmr'
+./scripts/instalar.sh     # una sola vez: instala tkinter/psutil y crea el comando 'sdmr'
 sdmr              # abre el dashboard con servidor + 3 agentes en marcha
 ```
 Opciones: `sdmr --agentes 5`, `sdmr --udp 6000 --tcp 6001`,
 `sdmr --host 192.168.0.10 --tcp 5001` (para conectarse a otro equipo).
-Si preferís no instalar nada global, `./sdmr` funciona igual desde la carpeta.
+Si preferís no instalar nada global, `./scripts/sdmr` funciona igual desde la carpeta.
 
 **Windows:**
-* Doble clic en `iniciar_todo.bat` → **recomendado**: levanta servidor +
+* Doble clic en `scripts/iniciar_todo.bat` → **recomendado**: levanta servidor +
   gateway + web + 2 agentes y verifica la red solo (ver § Orden de encendido).
-* Doble clic en `iniciar_sdmr.bat` → solo dashboard Tkinter en modo Demo.
+* Doble clic en `scripts/iniciar_sdmr.bat` → solo dashboard Tkinter en modo Demo.
 * Para tener un ícono en el Escritorio, ejecutá una vez
-  `crear_acceso_directo.bat` (crea el acceso directo que apunta al `.bat`).
+  `scripts/crear_acceso_directo.bat` (crea el acceso directo que apunta al `.bat`).
 
 > El lanzador abre la pestaña **Demo**, que levanta el servidor y los agentes
 > como procesos hijo y conecta el dashboard automáticamente.
@@ -186,7 +189,7 @@ Si preferís no instalar nada global, `./sdmr` funciona igual desde la carpeta.
 | 1 | Servidor central | `python server/server.py` | PC servidor, terminal 1 |
 | 2 | Gateway WS + web | `python server/gateway.py 5003 127.0.0.1 5001 --serve-web` | PC servidor, terminal 2 |
 | 3 | Agentes (uno por equipo a monitorear) | `python agent/agent.py <ID> <IP_SERVIDOR> 5000 <PUERTO_CMD>` | Cada equipo, una terminal por agente |
-| 4 | Verificación | `python verificar_red.py <IP_SERVIDOR> 5000 5001 5003` | Cualquier equipo (esperar 3/3 OK) |
+| 4 | Verificación | `python tools/verificar_red.py <IP_SERVIDOR> 5000 5001 5003` | Cualquier equipo (esperar 3/3 OK) |
 | 5 | Clientes a elección | CLI / Tkinter / web / móvil (ver sección Clientes) | Donde corresponda |
 
 **Credenciales de Administrador por defecto:**
@@ -266,13 +269,13 @@ python agent/agent.py NODO_02 TU_IP 5000 5004
 **Cada agente en la misma máquina necesita un puerto distinto**
 (5002, 5004, …). Si cada agente vive en una máquina distinta, todos pueden
 usar el `5002`. En el otro equipo también sirven los lanzadores
-`agente_remoto.bat TU_IP NODO_02` / `./agente_remoto.sh TU_IP NODO_02`.*
+`scripts/agente_remoto.bat TU_IP NODO_02` / `./scripts/agente_remoto.sh TU_IP NODO_02`.*
 
 #### 4️⃣ Verificar que todo llega (CUARTO, recomendado)
 Desde cualquier equipo:
 ```bash
-# Sintaxis: python verificar_red.py <IP_SERVIDOR> [UDP] [TCP] [WS]
-python verificar_red.py TU_IP 5000 5001 5003
+# Sintaxis: python tools/verificar_red.py <IP_SERVIDOR> [UDP] [TCP] [WS]
+python tools/verificar_red.py TU_IP 5000 5001 5003
 ```
 *Comprueba `[1/3]` PING TCP, `[2/3]` telemetría UDP registrada y
 `[3/3]` gateway WS. Tiene que dar **3/3 OK** antes de abrir los clientes.*
@@ -389,11 +392,11 @@ La forma más simple, con los lanzadores incluidos:
 
 **Linux:**
 ```bash
-./agente_remoto.sh 192.168.1.50 NODO_02
+./scripts/agente_remoto.sh 192.168.1.50 NODO_02
 ```
 **Windows:**
 ```bat
-agente_remoto.bat 192.168.1.50 NODO_02
+scripts/agente_remoto.bat 192.168.1.50 NODO_02
 ```
 El ID de nodo es opcional (por defecto usa el hostname del equipo); el puerto
 UDP por defecto es `5000` y el del canal `EXEC` es `5002`. Sintaxis completa:
@@ -413,7 +416,7 @@ python3 agent/agent.py NODO_02 192.168.1.50 5000 5002
 
 Desde cualquier equipo, antes o durante la demo:
 ```bash
-python3 verificar_red.py 192.168.1.50 5000 5001 5003
+python3 tools/verificar_red.py 192.168.1.50 5000 5001 5003
 ```
 Comprueba `[1/3]` PING TCP, `[2/3]` telemetría UDP registrada y `[3/3]`
 gateway WS para web/móvil. Si algo falla, indica si el problema es la IP o el
@@ -467,7 +470,7 @@ el archivo presente en tiempo de ejecución.
 
 Notas:
 * Requiere un servidor con Tk instalado. En Linux suele necesitar `sudo apt install python3-tk`
-  (o simplemente ejecutá `./instalar.sh`, que lo deja listo).
+  (o simplemente ejecutá `./scripts/instalar.sh`, que lo deja listo).
 * La actualización del dashboard usa `after()` en el hilo principal de Tk, porque Tkinter no es thread-safe.
 * Si los puertos 5000/5001 están ocupados, la demo **avanza automáticamente al
   siguiente par de puertos libres** y lo informa en el log.
@@ -480,7 +483,7 @@ Ejecuta una batería **no interactiva** que levanta el servidor y 3 agentes en
 puertos libres, y verifica las pruebas de la consigna del TPI:
 
 ```bash
-python3 test_system.py
+python3 tools/test_system.py
 ```
 
 | Prueba | Qué verifica |

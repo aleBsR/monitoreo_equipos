@@ -28,7 +28,7 @@ while [ -L "$SRC" ]; do
     SRC="$(readlink "$SRC")"
     [[ "$SRC" != /* ]] && SRC="$DIR/$SRC"
 done
-RAIZ="$(cd -P "$(dirname "$SRC")" && pwd)"
+RAIZ="$(cd -P "$(dirname "$SRC")/.." && pwd)"
 
 if [ ! -f "$RAIZ/agent/agent.py" ]; then
     echo "ERROR: no encuentro 'agent/agent.py' en:"

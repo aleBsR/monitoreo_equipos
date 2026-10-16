@@ -27,10 +27,10 @@ import sys
 import threading
 import time
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from client.admin_client import AdminClient
 
-RAIZ = os.path.dirname(os.path.abspath(__file__))
+RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUTA_SERVIDOR = os.path.join(RAIZ, "server", "server.py")
 RUTA_AGENTE = os.path.join(RAIZ, "agent", "agent.py")
 

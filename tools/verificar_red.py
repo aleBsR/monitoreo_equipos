@@ -34,8 +34,8 @@ import sys
 import time
 import uuid
 
-# Permitir importar el protocolo común cuando se ejecuta desde la raíz
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__))))
+# Permitir importar el protocolo común (vive en la raíz, un nivel arriba)
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from common.protocol import (
     DEFAULT_UDP_PORT,

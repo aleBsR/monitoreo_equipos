@@ -23,7 +23,7 @@ while [ -L "$SRC" ]; do
     SRC="$(readlink "$SRC")"
     [[ "$SRC" != /* ]] && SRC="$DIR/$SRC"
 done
-RAIZ="$(cd -P "$(dirname "$SRC")" && pwd)"
+RAIZ="$(cd -P "$(dirname "$SRC")/.." && pwd)"
 
 if [ ! -f "$RAIZ/client/gui_monitor.py" ]; then
     echo "ERROR: no encuentro el proyecto en:"
@@ -45,7 +45,7 @@ if ! "$PY" -c "import tkinter" >/dev/null 2>&1; then
     echo "ERROR: falta el módulo 'tkinter' (interfaz gráfica)."
     echo "En Debian/Ubuntu instalalo con:"
     echo "    sudo apt install python3-tk"
-    echo "O ejecutá ./instalar.sh para que lo deje listo."
+    echo "O ejecutá ./scripts/instalar.sh para que lo deje listo."
     exit 1
 fi
 

@@ -17,8 +17,8 @@
 # =============================================================================
 set -euo pipefail
 
-RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LANZADOR="$RAIZ/sdmr"
+RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LANZADOR="$RAIZ/scripts/sdmr"
 DESTINO="/usr/local/bin/sdmr"
 DESKTOP_DIR="$HOME/.local/share/applications"
 DESKTOP="$DESKTOP_DIR/sdmr.desktop"

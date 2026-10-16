@@ -5,7 +5,7 @@ REM  Levanta: Servidor TCP/UDP + Gateway WS + 2 Agentes + Web compilada
 REM  Luego abri: http://127.0.0.1:5173  y  Expo Go -> ws://TU_IP:5003
 REM ============================================================================
 setlocal
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 where py >nul 2>nul
 if %errorlevel%==0 ( set "PY=py -3" ) else ( set "PY=python" )
@@ -55,7 +55,7 @@ start "SDMR NODO_02" %PY% -u agent\agent.py NODO_02 127.0.0.1 5000 5004
 timeout /t 2 /nobreak >nul
 
 echo [4/4] Verificando red local...
-%PY% -u verificar_red.py 127.0.0.1 5000 5001 5003
+%PY% -u tools\verificar_red.py 127.0.0.1 5000 5001 5003
 
 echo.
 echo ============================================================================

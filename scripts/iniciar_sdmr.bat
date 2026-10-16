@@ -7,7 +7,7 @@ REM  Hace doble clic en este archivo, o usa el acceso directo del Escritorio
 REM  (crear_acceso_directo.bat).
 REM ============================================================================
 setlocal
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 REM Elegir interprete: se prefiere el lanzador 'py' (Python Launcher)
 where py >nul 2>nul
