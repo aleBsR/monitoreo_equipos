@@ -422,6 +422,37 @@ Comprueba `[1/3]` PING TCP, `[2/3]` telemetría UDP registrada y `[3/3]`
 gateway WS para web/móvil. Si algo falla, indica si el problema es la IP o el
 firewall, y sugiere las reglas a abrir.
 
+### 7. Auto-instalacion del agente (sin terminal, al iniciar sesion)
+
+Para dejar un equipo cliente monitoreandose solo, sin abrir terminales:
+
+**Windows (en el equipo cliente, dentro de la carpeta del proyecto):**
+`at
+scripts\instalar_agente.bat                # IP por broadcast (automatico)
+scripts\instalar_agente.bat 192.168.1.50    # IP fija en agent\config.ini
+scripts\instalar_agente.bat 192.168.1.50 LAPTOP-JUAN
+`
+**Linux / macOS:**
+`ash
+./scripts/instalar_agente.sh
+./scripts/instalar_agente.sh 192.168.1.50 NODO_02
+`
+Que hace: escribe gent/config.ini, crea el acceso directo de arranque
+(carpeta de Inicio en Windows / ~/.config/autostart en Linux), abre la regla
+de firewall del canal EXEC (TCP 5002) si hay administrador, y arranca el agente
+oculto (pythonw.exe / nohup). Para quitarlo: scripts\desinstalar_agente.bat /
+./scripts/desinstalar_agente.sh.
+
+**Descubrimiento automatico (broadcast):** si no se pasa la IP del servidor (o
+config.ini tiene ip_servidor vacio), el agente emite SRVREQ por broadcast
+y el Servidor Central responde SRVINFO con su IP y puertos. No hace falta
+saber la IP del servidor de antemano. El dashboard incluye el boton
+"Copiar comando para clientes" que copia el comando de instalacion con la IP
+del servidor al que esta conectado.
+
+El agente corre sin ventana y escribe su log en gent/agente.log (rotacion
+automatica a 512 KB).
+
 ### 6. En otro equipo: administrar con el cliente o el dashboard
 
 ```bash

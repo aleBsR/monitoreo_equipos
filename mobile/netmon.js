@@ -13,12 +13,13 @@ export function parseNodes(payload) {
     if (!entry || entry.startsWith('NODES_COUNT')) continue
     const f = entry.split(':')
     if (f.length < 3) continue
-    const n = { id: f[0], ip: f[1], estado: f[2], cpu: 0, ram: 0, disco: 0 }
-    for (const kv of (entry.match(/(CPU|RAM|DISK)=([0-9]+(?:\.[0-9]+)?)/g) || [])) {
+    const n = { id: f[0], ip: f[1], estado: f[2], cpu: 0, ram: 0, disco: 0, last: null }
+    for (const kv of (entry.match(/(CPU|RAM|DISK|LAST)=([0-9]+(?:\.[0-9]+)?)/g) || [])) {
       const [k, v] = kv.split('=')
       if (k === 'CPU') n.cpu = parseFloat(v)
       if (k === 'RAM') n.ram = parseFloat(v)
       if (k === 'DISK') n.disco = parseFloat(v)
+      if (k === 'LAST') n.last = parseFloat(v)
     }
     out.push(n)
   }

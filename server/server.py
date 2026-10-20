@@ -9,6 +9,9 @@ Características de Red e Hilos:
   1. Hilo Escuchador UDP (Puerto 5000):
      - Recibe datagramas sin conexión (`socket.recvfrom()`) provenientes de los Agentes.
      - Parsea las métricas de telemetría (CPU, RAM, Disco) y actualiza el registro global de nodos.
+     - Responde SRVREQ (descubrimiento automático): el agente broadcast su solicitud
+       y este servidor le contesta SRVINFO con su IP y puertos, de modo que los
+       clientes se unen a la red sin configurar la IP a mano.
   
   2. Hilo Principal Escuchador TCP (Puerto 5001):
      - Abre un socket de escucha TCP (`socket.listen()`).
@@ -52,6 +55,9 @@ from common.protocol import (
     parse_tcp_response,
     build_tcp_response,
     build_exec_command,
+    parse_srv_request,
+    build_srv_info,
+    es_trama_descubrimiento,
     TcpFrameReader,
     FrameTooLongError
 )
@@ -164,6 +170,67 @@ class MonitoringServer:
             print(f"[ERROR] No se pudo asociar el socket {tipo} en {puerto}: {e}")
             sys.exit(1)
 
+    def _ip_hacia(self, destino: str) -> str:
+        """
+        Dirección IP local con la que ESTE servidor alcanza a `destino`.
+
+        Se abre un socket UDP efímero y se hace connect() (sin enviar un solo
+        byte): el sistema elige la interfaz de salida y getsockname() devuelve
+        la IP real. Evita responder 0.0.0.0 a un SRVREQ.
+
+        :param destino: IP del agente que pidió el descubrimiento.
+        :return: Cadena con la IP local, o "127.0.0.1" como último recurso.
+        """
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.connect((destino, 1))
+            return sock.getsockname()[0]
+        except OSError:
+            return "127.0.0.1"
+        finally:
+            if sock is not None:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+
+    def _responder_descubrimiento(self, raw_message: str, addr: tuple):
+        """
+        Atiende un SRVREQ (broadcast de un agente que no sabe dónde está el
+        servidor) y le contesta SRVINFO con la IP y puertos de este servidor.
+
+        La respuesta va por UNICAST al origen: sale por la misma interfaz que
+        recibió el datagrama, así el agente aprende una IP alcanzable.
+
+        :param raw_message: Trama UDP cruda recibida.
+        :param addr: Tupla (ip_origen, puerto_origen) del agente.
+        :return: True si la trama era de descubrimiento (ya atendida).
+        """
+        if not es_trama_descubrimiento(raw_message):
+            return False
+        if not raw_message.startswith("SRVREQ|"):
+            # Un SRVINFO llegado acá no es para nosotros (somos el servidor).
+            return True
+
+        try:
+            solicitud = parse_srv_request(raw_message)
+        except ValueError as ve:
+            print(f"[UDP - Descubrimiento] Solicitud inválida desde {addr}: {ve}")
+            return True
+
+        ip_servidor = self._ip_hacia(addr[0])
+        respuesta = build_srv_info(solicitud["node_id"], ip_servidor, self.udp_port, self.tcp_port)
+        try:
+            self.udp_socket.sendto(encode_message(respuesta), addr)
+            print(
+                f"[UDP - Descubrimiento] Nodo '{solicitud['node_id']}' desde {addr[0]} "
+                f"-> SRVINFO {ip_servidor} (UDP {self.udp_port} / TCP {self.tcp_port})"
+            )
+        except OSError as e:
+            print(f"[UDP - Descubrimiento] No se pudo responder a {addr}: {e}")
+        return True
+
     def _udp_listener_loop(self):
         """
         Bucle de ejecución para escuchar datagramas UDP entrantes de los agentes.
@@ -174,7 +241,11 @@ class MonitoringServer:
                 # Retorna una tupla: (datos_recibidos: bytes, direccion_cliente: (IP, Puerto))
                 data, addr = self.udp_socket.recvfrom(BUFFER_SIZE)
                 raw_message = decode_message(data)
-                
+
+                # 0. Descubrimiento automático: SRVREQ -> SRVINFO
+                if self._responder_descubrimiento(raw_message, addr):
+                    continue
+
                 # Intentar parsear el paquete de telemetría usando nuestro protocolo
                 try:
                     telemetry = parse_udp_telemetry(raw_message)
@@ -355,13 +426,21 @@ class MonitoringServer:
 
         # 3. Consulta de lista de Nodos (GET_NODES)
         if action == "GET_NODES":
+            ahora = time.time()
             with self.registry_lock:
                 if not self.nodes_registry:
                     return build_tcp_response("OK", "NODES_COUNT:0", "No hay nodos registrados en el sistema")
                 
                 nodes_list = []
                 for n_id, info in self.nodes_registry.items():
-                    node_str = f"{n_id}:{info['ip']}:{info['status']}:CPU={info['cpu']}%:RAM={info['ram']}%:DISK={info['disk']}%"
+                    # LAST: segundos transcurridos desde el último heartbeat UDP.
+                    # Campo OPCIONAL: los clientes viejos lo ignoran sin romperse.
+                    ultima = max(0, int(ahora - info.get("last_seen", ahora)))
+                    node_str = (
+                        f"{n_id}:{info['ip']}:{info['status']}"
+                        f":CPU={info['cpu']}%:RAM={info['ram']}%:DISK={info['disk']}%"
+                        f":LAST={ultima}"
+                    )
                     nodes_list.append(node_str)
                 
                 payload = f"NODES_COUNT:{len(nodes_list)};" + ";".join(nodes_list)

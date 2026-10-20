@@ -56,3 +56,24 @@ python tools/test_system.py
 > **Carpetas:** `server/` `agent/` `client/` `common/` = código Python ·
 > `web/` = React · `mobile/` = Expo · `scripts/` = lanzadores ·
 > `tools/` = verificación y tests · `docs/` = propuesta y bibliografía.
+
+## 6. Auto-instalacion del agente (sin terminal)
+
+En cada PC cliente, una sola vez:
+`ash
+# Windows
+scripts\instalar_agente.bat                # IP por broadcast (automatico)
+scripts\instalar_agente.bat 192.168.1.50    # IP fija en agent\config.ini
+
+# Linux / macOS
+./scripts/instalar_agente.sh
+./scripts/instalar_agente.sh 192.168.1.50 NODO_02
+`
+A partir de ahi el agente arranca solo, oculto, al iniciar sesion (carpeta de
+Inicio en Windows / ~/.config/autostart en Linux). Para quitarlo:
+scripts\desinstalar_agente.bat / ./scripts/desinstalar_agente.sh.
+
+Si no se pasa la IP del servidor, el agente la descubre solo por broadcast
+(SRVREQ -> SRVINFO). En el dashboard del administrador, pestana Nodos ->
+boton "Copiar comando para clientes" copia el comando de instalacion con la IP
+del servidor al que esta conectado.

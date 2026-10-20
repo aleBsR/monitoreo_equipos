@@ -1,4 +1,4 @@
----
+﻿---
 name: sdmr-monitoreo
 description: Contexto del proyecto SDMR (Sistema Distribuido de Monitoreo en Red) - TPI de Programación de Redes con Sockets en Python. Úsala al trabajar en server/server.py, agent/agent.py, client/admin_client.py, common/protocol.py, el protocolo NETMON/1.0, el test_system.py, o cuando se mencione SDMR, NETMON, monitoreo de equipos, nodos, telemetría UDP, heartbeat, watchdog o EXEC remoto.
 ---
@@ -76,10 +76,10 @@ Texto plano, delimitador `|`, framing por `\n`, encoding UTF-8.
 | TCP solicitud | `CMD\|<ACCION>\|<PARAM>\|...` |
 | TCP respuesta | `RES\|<OK\|ERR>\|<PAYLOAD_O_CODIGO>\|<DETALLE>` |
 | TCP servidor->agente (EXEC) | `EXECCMD\|<COMANDO>` |
-
 Acciones TCP: `PING` (sin auth), `AUTH`, `GET_NODES`, `EXEC`.
+Descubrimiento UDP: `SRVREQ|<NODE_ID>` -> `SRVINFO|<NODE_ID>|<IP>|<UDP>|<TCP>`.
 
-El campo `PUERTO_CMD` de la telemetría UDP es **opcional** (7 u 8 campos): es el
+
 puerto TCP donde el agente escucha `EXECCMD`. `parse_udp_telemetry` valida ambos.
 
 Códigos de error: `ERR_100` malformado · `ERR_101` no autenticado ·
@@ -118,7 +118,7 @@ cualquier otro -> `ERR_104` y queda rechazado. Cada orden se registra en
 
 ```bash
 python server/server.py [udp_port] [tcp_port] [segundos_purga_offline]
-python agent/agent.py <ID_NODO> <IP_SERVIDOR> [PUERTO_UDP] [PUERTO_CMD_TCP]
+python agent/agent.py [ID_NODO] [IP_SERVIDOR] [PUERTO_UDP] [PUERTO_CMD_TCP]  # flags: --silent --config --id --ip --udp --cmd --intervalo
 python client/admin_client.py <IP_SERVIDOR> [PUERTO_TCP]
 python client/gui_monitor.py [--demo] [--agentes N] [--udp P] [--tcp P] [--host IP]
 
@@ -146,6 +146,36 @@ y `tcp.port == 5002` para ver el `EXECCMD` hacia el agente.
    (120 s por defecto, 3er argumento del servidor). `nodes_registry` no crece.
 5. **Puerto ocupado:** el servidor detecta `EADDRINUSE` y sale con mensaje
    claro; la demo de la GUI avanza al siguiente puerto libre.
+
+## Auto-union de nodos (implementado)
+
+- **Descubrimiento por broadcast (SRVREQ/SRVINFO):** common/protocol.py
+  define SRVREQ_HEADER/SRVINFO_HEADER y los helpers uild_srv_request,
+  parse_srv_request, uild_srv_info, parse_srv_info, es_trama_descubrimiento.
+  El servidor responde por unicast desde _responder_descubrimiento invocado
+  dentro de _udp_listener_loop (antes de parsear telemetria). _ip_hacia()
+  obtiene la IP local hacia el destino con socket UDP efimero + connect().
+- **Agente sin IP fija:** gent/agent.py acepta --silent (pythonw.exe no
+  tiene stdout/stderr: se redirigen con _SalidaNula), leer_config lee
+  gent/config.ini, y descubrir_servidor() emite SRVREQ cada 2 s hasta
+  recibir SRVINFO; si hay IP configurada la usa directo. Redescubre cada 30 s.
+- **Arranque oculto:** scripts/instalar_agente.bat/.sh + desinstaladores
+  crean el acceso directo de arranque (carpeta de Inicio / autostart XDG),
+  abren la regla de firewall del canal EXEC (TCP 5002) si hay admin/root,
+  y arrancan el agente ahora (pythonw.exe / nohup). demo_automatico.bat
+  levanta servidor + agentes ocultos.
+- **GUI mejorada:** columna "ACTUALIZADO" (parsea LAST=), badge amarillo y
+  notificacion sonora/log al detectar un nodo nuevo, boton "Copiar comando para
+  clientes" que copia al portapapeles el comando de instalacion con la IP del
+  servidor conectado.
+- **GET_NODES** ahora agrega :LAST=<segundos> por nodo; clientes web/movil
+  tolerantes (parsean LAST opcional).
+- **Config local:** gent/config.ini (ignorado por .gitignore) con
+  gent/config.example.ini como plantilla.
+- **Bugs corregidos relacionados:** pythonw.exe stdout=None; broadcast
+  255.255.255.255 no vuelve a procesos locales (se agrega 127.0.0.1 a los
+  destinos de descubrimiento).
+
 
 ## Pendiente / no implementado
 

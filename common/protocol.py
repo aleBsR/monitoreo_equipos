@@ -14,6 +14,13 @@ Estructura de Mensajes:
       MON|<ID_NODO>|<IP>|<CPU_%>|<RAM_%>|<DISK_%>|<STATUS>
       Ejemplo: MON|NODO_01|127.0.0.1|34.5|62.0|45.2|OK
 
+  - UDP (Descubrimiento del servidor, ambos sentidos):
+      Agente -> red (broadcast):  SRVREQ|<ID_NODO>
+      Servidor -> agente (unicast): SRVINFO|<IP_SERVIDOR>|<PUERTO_UDP>|<PUERTO_TCP>
+      El agente arranca sin conocer la IP del servidor: emite SRVREQ hasta que
+      un servidor le responda SRVINFO con su dirección. Si `agent/config.ini`
+      trae la IP escrita, el descubrimiento se salta.
+
   - TCP (Comandos Solicitud):
       CMD|<ACCION>|<PARAM1>|<PARAM2>|...
       Ejemplo: CMD|AUTH|admin|admin123
@@ -155,6 +162,96 @@ def parse_udp_telemetry(message: str) -> dict:
         "cmd_port": cmd_port,
         "timestamp": time.time()
     }
+
+
+# =============================================================================
+# FUNCIONES PARA EL DESCUBRIMIENTO AUTOMÁTICO DEL SERVIDOR (UDP)
+# =============================================================================
+
+SRVREQ_HEADER = "SRVREQ"    # Agente -> red (broadcast): "¿dónde está el servidor?"
+SRVINFO_HEADER = "SRVINFO"  # Servidor -> agente (unicast): "acá estoy"
+
+
+def build_srv_request(node_id: str) -> str:
+    """
+    Agente -> red (broadcast). Pide la dirección del Servidor Central.
+
+    Formato: SRVREQ|<node_id>
+    """
+    return f"{SRVREQ_HEADER}{DELIMITER}{node_id}"
+
+
+def parse_srv_request(message: str) -> dict:
+    """
+    Servidor: parsea una solicitud de descubrimiento.
+
+    :return: {'node_id': str}
+    :raises ValueError: Si no es un SRVREQ válido.
+    """
+    parts = message.split(DELIMITER)
+    if len(parts) < 2 or parts[0] != SRVREQ_HEADER:
+        raise ValueError(f"No es una solicitud de descubrimiento: '{message}'")
+
+    node_id = parts[1].strip()
+    if not node_id:
+        raise ValueError("La solicitud de descubrimiento no incluye un ID de nodo.")
+
+    return {"node_id": node_id}
+
+
+def build_srv_info(node_id: str, server_ip: str, udp_port: int, tcp_port: int) -> str:
+    """
+    Servidor -> agente (unicast): dirección y puertos del Servidor Central.
+
+    Formato: SRVINFO|<node_id>|<IP_SERVIDOR>|<PUERTO_UDP>|<PUERTO_TCP>
+
+    Se devuelve el `node_id` pedido para que el agente sepa que la respuesta
+    es para él y no para otro nodo que también estaba descubriendo.
+    """
+    return f"{SRVINFO_HEADER}{DELIMITER}{node_id}{DELIMITER}{server_ip}{DELIMITER}{int(udp_port)}{DELIMITER}{int(tcp_port)}"
+
+
+def parse_srv_info(message: str) -> dict:
+    """
+    Agente: parsea la respuesta de descubrimiento.
+
+    :return: {'node_id': str, 'server_ip': str, 'udp_port': int, 'tcp_port': int}
+    :raises ValueError: Si no es un SRVINFO válido o los puertos no son válidos.
+    """
+    parts = message.split(DELIMITER)
+    if len(parts) < 5 or parts[0] != SRVINFO_HEADER:
+        raise ValueError(f"No es una respuesta de descubrimiento: '{message}'")
+
+    node_id = parts[1].strip()
+    server_ip = parts[2].strip()
+
+    if not node_id:
+        raise ValueError("SRVINFO sin ID de nodo.")
+    if not server_ip:
+        raise ValueError("SRVINFO sin dirección IP del servidor.")
+
+    try:
+        udp_port = int(parts[3])
+        tcp_port = int(parts[4])
+    except ValueError:
+        raise ValueError("Los puertos de SRVINFO deben ser enteros.")
+
+    if not (1 <= udp_port <= 65535) or not (1 <= tcp_port <= 65535):
+        raise ValueError("Los puertos de SRVINFO deben estar dentro de [1, 65535].")
+
+    return {
+        "node_id": node_id,
+        "server_ip": server_ip,
+        "udp_port": udp_port,
+        "tcp_port": tcp_port,
+    }
+
+
+def es_trama_descubrimiento(message: str) -> bool:
+    """Indica si una trama UDP es de descubrimiento (SRVREQ o SRVINFO)."""
+    return message.startswith(f"{SRVREQ_HEADER}{DELIMITER}") or message.startswith(
+        f"{SRVINFO_HEADER}{DELIMITER}"
+    )
 
 
 # =============================================================================

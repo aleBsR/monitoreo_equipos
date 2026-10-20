@@ -14,20 +14,21 @@ export function parseRes(raw) {
 }
 
 export function parseNodes(payload) {
-  // NODES_COUNT:2;NODO_01:192.168.43.10:OK:CPU=35.4%:RAM=62.1%:DISK=40.0%
+  // NODES_COUNT:2;NODO_01:192.168.43.10:OK:CPU=35.4%:RAM=62.1%:DISK=40.0%:LAST=1.2
   const out = []
   for (const entry of String(payload || '').split(';')) {
     if (!entry || entry.startsWith('NODES_COUNT')) continue
     const f = entry.split(':')
     if (f.length < 3) continue
-    const n = { id: f[0], ip: f[1], estado: f[2], cpu: 0, ram: 0, disco: 0 }
-    const m = entry.match(/(CPU|RAM|DISK)=([0-9]+(?:\.[0-9]+)?)/g) || []
+    const n = { id: f[0], ip: f[1], estado: f[2], cpu: 0, ram: 0, disco: 0, last: null }
+    const m = entry.match(/(CPU|RAM|DISK|LAST)=([0-9]+(?:\.[0-9]+)?)/g) || []
     for (const kv of m) {
       const [k, v] = kv.split('=')
       const num = parseFloat(v)
       if (k === 'CPU') n.cpu = num
       if (k === 'RAM') n.ram = num
       if (k === 'DISK') n.disco = num
+      if (k === 'LAST') n.last = num
     }
     out.push(n)
   }

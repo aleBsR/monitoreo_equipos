@@ -17,7 +17,11 @@ mobile/dist/
 
 # Archivos de registro generados por los agentes
 *.log
+*.log.old
 agent/historial_comandos.log
+
+# Config local del agente (IP del servidor: distinta en cada equipo cliente)
+agent/config.ini
 
 # Sistema operativo / editores
 .DS_Store

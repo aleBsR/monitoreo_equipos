@@ -1,4 +1,4 @@
-"""
+﻿"""
 ================================================================================
 Interfaz Gráfica de Monitoreo SDMR (Dashboard Tkinter)
 ================================================================================
@@ -63,8 +63,8 @@ from client.contenido_ayuda import INSTRUCCIONES, CONCEPTOS, FUENTE_LIBRO
 MAX_LOG_LINES = 2000
 
 # Expresión para extraer los valores numéricos del payload de GET_NODES.
-# El servidor serializa:  NODO_01:192.168.1.5:OK:CPU=35.4%:RAM=62.1%:DISK=40.0%
-METRIC_RE = re.compile(r"(CPU|RAM|DISK)=([0-9]+(?:\.[0-9]+)?)")
+# El servidor serializa:  NODO_01:192.168.1.5:OK:CPU=35.4%:RAM=62.1%:DISK=40.0%:LAST=1.2
+METRIC_RE = re.compile(r"(CPU|RAM|DISK|LAST)=([0-9]+(?:\.[0-9]+)?)")
 
 
 def barra(porcentaje, ancho=10):
@@ -285,19 +285,21 @@ class SDMRMonitorGUI:
         self.entrada_comando.pack(side="left", padx=(0, 8))
         ttk.Button(barra, text="Enviar (EXEC)", command=self.ejecutar_comando).pack(side="left")
 
+        ttk.Separator(barra, orient="vertical").pack(side="left", fill="y", padx=8)
+        ttk.Button(barra, text="📋 Copiar comando para clientes", command=self.copiar_comando_clientes).pack(side="left")
+
         ttk.Label(barra, text="Doble clic en una fila para seleccionarla como destino.",
                   style="Hint.TLabel").pack(side="right")
 
         # --- Tabla de nodos ---
         marco_tabla = ttk.Frame(marco)
-        marco_tabla.pack(fill="both", expand=True)
-
-        columnas = ("nodo", "ip", "estado", "cpu", "ram", "disco")
+        columnas = ("nodo", "ip", "actualizado", "estado", "cpu", "ram", "disco")
         self.tabla_nodos = ttk.Treeview(marco_tabla, columns=columnas, show="headings", selectmode="browse")
 
         titulos = {
             "nodo": ("NODO", 120, "w"),
             "ip": ("DIRECCIÓN IP", 145, "w"),
+            "actualizado": ("ACTUALIZADO", 110, "center"),
             "estado": ("ESTADO", 115, "center"),
             "cpu": ("CPU", 190, "w"),
             "ram": ("MEMORIA RAM", 190, "w"),
@@ -306,12 +308,14 @@ class SDMRMonitorGUI:
         for clave, (titulo, ancho, ancla) in titulos.items():
             self.tabla_nodos.heading(clave, text=titulo)
             self.tabla_nodos.column(clave, width=ancho, anchor=ancla, stretch=(clave == "estado"))
+            self.tabla_nodos.heading(clave, text=titulo)
+            self.tabla_nodos.column(clave, width=ancho, anchor=ancla, stretch=(clave == "estado"))
 
         # Colores por estado de salud del nodo
         self.tabla_nodos.tag_configure("ok", background="#e8f8ec", foreground="#14663a")
         self.tabla_nodos.tag_configure("warning", background="#fff6e0", foreground="#8a5a00")
         self.tabla_nodos.tag_configure("offline", background="#fdecec", foreground="#9c1c1c")
-
+        self.tabla_nodos.tag_configure("nuevo", background="#fff3cd", foreground="#856404")
         barra_scroll = ttk.Scrollbar(marco_tabla, orient="vertical", command=self.tabla_nodos.yview)
         self.tabla_nodos.configure(yscrollcommand=barra_scroll.set)
 
@@ -773,9 +777,9 @@ class SDMRMonitorGUI:
         :param payload: Segundo campo de la respuesta RES|OK|...
         :return: Lista de diccionarios con id, ip, estado, cpu, ram, disk.
         """
-        # El servidor emite las claves 'CPU', 'RAM' y 'DISK'; se normalizan a
-        # 'cpu', 'ram' y 'disco' para no perder el valor del disco.
-        claves = {"CPU": "cpu", "RAM": "ram", "DISK": "disco"}
+# El servidor emite las claves 'CPU', 'RAM', 'DISK' y 'LAST' (segundos desde
+# la última telemetría). Se normalizan a 'cpu', 'ram', 'disco' y 'last'.
+        claves = {"CPU": "cpu", "RAM": "ram", "DISK": "disco", "LAST": "last"}
 
         nodos = []
         for entrada in payload.split(";"):
@@ -784,9 +788,14 @@ class SDMRMonitorGUI:
             campos = entrada.split(":")
             if len(campos) < 3:
                 continue
-            nodo = {"id": campos[0], "ip": campos[1], "estado": campos[2], "cpu": 0.0, "ram": 0.0, "disco": 0.0}
+            nodo = {"id": campos[0], "ip": campos[1], "estado": campos[2],
+                    "cpu": 0.0, "ram": 0.0, "disco": 0.0, "last": None}
+            # El último campo puede ser 'LAST=Ns' o una métrica; se captura con regex.
             for clave, valor in METRIC_RE.findall(entrada):
                 nodo[claves.get(clave, clave.lower())] = float(valor)
+            last_match = re.search(r"LAST=([0-9]+(?:\.[0-9]+)?)", entrada)
+            if last_match:
+                nodo["last"] = float(last_match.group(1))
             nodos.append(nodo)
         return nodos
 
@@ -815,21 +824,52 @@ class SDMRMonitorGUI:
 
     def _pintar_nodos(self, nodos: list):
         """
-        Vuelve a dibujar la tabla completa conservando la selección.
+        Vuelve a dibujar la tabla completa conservando la seleccion.
         """
         seleccion = self.entrada_nodo.get().strip()
         self.tabla_nodos.delete(*self.tabla_nodos.get_children())
+
+        # Badge para nodos nuevos: se registra la primera vez que aparecen.
+        if not hasattr(self, "_nodos_vistos"):
+            self._nodos_vistos = set()
+            self._nodos_nuevos = set()
+
+        nuevos = [n["id"] for n in nodos if n["id"] not in self._nodos_vistos]
+        for nid in nuevos:
+            self._nodos_nuevos.add(nid)
+        for n in nodos:
+            self._nodos_vistos.add(n["id"])
+
+        # Notificacion en el log si hay nodos nuevos.
+        if nuevos:
+            self._registrar("Sistema", "Nuevo nodo conectado: " + ", ".join(nuevos), "sys")
+            try:
+                self.root.bell()
+            except tk.TclError:
+                pass
 
         for nodo in nodos:
             estado = nodo["estado"].upper()
             etiqueta = {"OK": "ok", "WARNING": "warning"}.get(estado, "offline")
             icono = {"OK": "🟢", "WARNING": "⚠"}.get(estado, "🔴")
 
+            # Columna "ACTUALIZADO": segundos desde la ultima telemetria del nodo.
+            last = nodo.get("last")
+            if last is None:
+                actualizado = "—"
+            elif last <= 3:
+                actualizado = f"hace {last:.1f}s"
+            elif last <= 10:
+                actualizado = f"hace {last:.0f}s"
+            else:
+                actualizado = f"hace {last:.0f}s ⚠"
+
             self.tabla_nodos.insert(
                 "", "end", iid=nodo["id"],
                 values=(
                     nodo["id"],
                     nodo["ip"],
+                    actualizado,
                     f"{icono} {estado}",
                     barra(nodo["cpu"]),
                     barra(nodo["ram"]),
@@ -841,12 +881,42 @@ class SDMRMonitorGUI:
             if nodo["id"] == seleccion:
                 self.tabla_nodos.selection_set(nodo["id"])
 
-        # El mensaje de estado vacío solo se ve cuando no hay nada que mostrar.
+        # Marca los nodos nuevos con fondo amarillo en la tabla.
+        for nid in list(self._nodos_nuevos):
+            try:
+                self.tabla_nodos.item(nid, tags=("nuevo",))
+            except tk.TclError:
+                pass
+
+        # El mensaje de estado vacio solo se ve cuando no hay nada que mostrar.
         if nodos:
             self.mensaje_vacio.place_forget()
         else:
             self.mensaje_vacio.place(relx=0.5, rely=0.5, anchor="center")
-            self.var_conteo.set("Sin nodos registrados. ¿Hay algún agente enviando telemetría?")
+            self.var_conteo.set("Sin nodos registrados. Hay algun agente enviando telemetria?")
+
+
+    def copiar_comando_clientes(self):
+        """
+        Copia al portapapeles el comando de instalacion para un cliente nuevo,
+        usando la IP del servidor al que esta conectado el dashboard.
+        """
+        host = self.entrada_host.get().strip() or "127.0.0.1"
+        cmd_bat = "scripts\\instalar_agente.bat " + host
+        cmd_sh = "./scripts/instalar_agente.sh " + host
+        texto = ("# Windows (en el equipo cliente, dentro de la carpeta del proyecto):\n" +
+                cmd_bat + "\n\n" +
+                "# Linux / macOS:\n" +
+                cmd_sh + "\n\n" +
+                "# El agente descubre al servidor solo por broadcast si no se pasa IP.")
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(texto)
+            self.root.update()
+            self._registrar("Sistema", "Comando de instalacion copiado al portapapeles.", "sys")
+        except tk.TclError as e:
+            self._registrar("Sistema", "No se pudo copiar al portapapeles: " + str(e), "err")
+
 
     def _al_seleccionar_nodo(self, _evento):
         """
