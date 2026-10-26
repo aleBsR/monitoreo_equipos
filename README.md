@@ -259,7 +259,8 @@ python server/gateway.py 5003 127.0.0.1 5001 --serve-web
   `http://TU_IP:5173` (ideal para la defensa sin internet).
 
 #### 3️⃣ Iniciar uno o varios Agentes de Monitoreo (TERCERO)
-Una terminal por cada equipo a monitorear:
+
+**Opción A — Por terminal** (una terminal por cada equipo a monitorear):
 ```bash
 # Sintaxis: python agent/agent.py <ID_NODO> <IP_SERVIDOR> <PUERTO_UDP> [PUERTO_CMD_TCP]
 python agent/agent.py NODO_01 127.0.0.1 5000 5002
@@ -270,6 +271,17 @@ python agent/agent.py NODO_02 TU_IP 5000 5004
 (5002, 5004, …). Si cada agente vive en una máquina distinta, todos pueden
 usar el `5002`. En el otro equipo también sirven los lanzadores
 `scripts/agente_remoto.bat TU_IP NODO_02` / `./scripts/agente_remoto.sh TU_IP NODO_02`.*
+
+**Opción B — Con un click (mini interfaz, sin terminal):** en el equipo
+cliente ejecutá una sola vez `scripts/agent/crear_accesos.sh` (Linux) o
+`scripts\agent\crear_accesos.bat` (Windows) para dejar un acceso directo en
+el Escritorio. A partir de ahí, doble clic en "SDMR Control Agente" abre una
+ventanita con botones **Iniciar / Detener / Estado / Abrir log** que controla
+el agente en esa misma máquina (arranca oculto con `--silent`). También se
+puede abrir manualmente:
+```bash
+python scripts/agent/agent_control.py
+```
 
 #### 4️⃣ Verificar que todo llega (CUARTO, recomendado)
 Desde cualquier equipo:
@@ -442,6 +454,13 @@ Que hace: escribe gent/config.ini, crea el acceso directo de arranque
 de firewall del canal EXEC (TCP 5002) si hay administrador, y arranca el agente
 oculto (pythonw.exe / nohup). Para quitarlo: scripts\desinstalar_agente.bat /
 ./scripts/desinstalar_agente.sh.
+
+**Control manual con un click (sin terminal):** además de la instalación
+automática, en `scripts/agent/` hay una mini interfaz (`agent_control.py`) y
+los creadores de accesos directos `crear_accesos.sh` / `crear_accesos.bat`.
+Ejecutalos una vez para dejar en el Escritorio "SDMR Control Agente", que abre
+una ventanita con botones **Iniciar / Detener / Estado / Abrir log** para
+controlar el agente de esa máquina sin tocar la terminal.
 
 **Descubrimiento automatico (broadcast):** si no se pasa la IP del servidor (o
 config.ini tiene ip_servidor vacio), el agente emite SRVREQ por broadcast
