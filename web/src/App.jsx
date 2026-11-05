@@ -91,6 +91,17 @@ export default function App() {
   const [execCmd, setExecCmd] = useState('DIAGNOSTIC')
   const [execOut, setExecOut] = useState('')
   const timer = useRef(null)
+  // --- Red (extra): servicio HTTP auxiliar (NO usa NETMON/1.0) ---
+  const [redServiceUrl, setRedServiceUrl] = useState(() => {
+    const h = window.location.hostname
+    const host = (!h || h === 'localhost') ? '127.0.0.1' : h
+    return `http://${host}:8090`
+  })
+  const [redSubnet, setRedSubnet] = useState('')
+  const [redHosts, setRedHosts] = useState([])
+  const [redMetodo, setRedMetodo] = useState('')
+  const [redCargando, setRedCargando] = useState(false)
+  const [redError, setRedError] = useState('')
 
   function pushLog(dir, texto) {
     setLogs(prev => [...prev.slice(-199), { h: new Date().toLocaleTimeString(), dir, texto }])
@@ -121,6 +132,38 @@ export default function App() {
     timer.current = setInterval(refrescar, 2000)
     return () => clearInterval(timer.current)
   }, [sesion])
+
+  async function escanearRed() {
+    setRedCargando(true); setRedError(''); setRedHosts([])
+    try {
+      const base = redServiceUrl.replace(/\/$/, '')
+      const url = `${base}/scan?subnet=${encodeURIComponent(redSubnet || '192.168.1.0/24')}`
+      const res = await fetch(url)
+      if (!res.ok) throw new Error('HTTP ' + res.status)
+      const data = await res.json()
+      setRedHosts(data.hosts || [])
+      setRedMetodo(`${data.method || ''} · scapy ${data.scapy_installed ? 'instalado' : 'no instalado'}`)
+      if (data.subnet && !redSubnet) setRedSubnet(data.subnet)
+    } catch (e) {
+      setRedError('No se pudo contactar al servicio HTTP extra (' + redServiceUrl + '): ' + (e.message || e) + '. ¿Está corriendo extras/lan_scan_service.py?')
+    } finally { setRedCargando(false) }
+  }
+
+  useEffect(() => {
+    if (tab !== 'redextra') return
+    if (redSubnet) return
+    ;(async () => {
+      try {
+        const base = redServiceUrl.replace(/\/$/, '')
+        const res = await fetch(base + '/')
+        const data = await res.json()
+        if (data && data.suggested_subnet) setRedSubnet(data.suggested_subnet)
+        else setRedSubnet('192.168.1.0/24')
+      } catch {
+        setRedSubnet('192.168.1.0/24')
+      }
+    })()
+  }, [tab, redServiceUrl, redSubnet])
 
   async function ejecutar() {
     setExecOut('Enviando CMD|EXEC…')
@@ -165,7 +208,7 @@ export default function App() {
 
       <div className="layout">
         <div className="sidebar">
-          {[['feed', '◉ Feed'], ['nodos', '▦ Nodos'], ['topo', '✦ Topología'], ['trafico', '⇄ Tráfico'], ['ayuda', '? Ayuda']].map(([k, l]) => (
+          {[['feed', '◉ Feed'], ['nodos', '▦ Nodos'], ['topo', '✦ Topología'], ['trafico', '⇄ Tráfico'], ['redextra', '🌐 Red (extra)'], ['ayuda', '? Ayuda']].map(([k, l]) => (
             <button key={k} className={'navbtn' + (tab === k ? ' active' : '')} onClick={() => setTab(k)}>{l}</button>
           ))}
           <div className="hint" style={{ padding: '8px 12px' }}>NETMON/1.0<br />UDP 5000 · TCP 5001<br />WS 5003 (gateway)</div>
@@ -266,6 +309,32 @@ export default function App() {
                 <div className="log">{logs.map((l, i) => (
                   <div key={i} className={l.dir.toLowerCase()}>{l.h} {l.dir} {l.texto}</div>
                 ))}</div>
+              </div></div>
+          )}
+
+          {tab === 'redextra' && (
+            <div className="card"><div className="card-h"><b>Red (extra) — descubrimiento de hosts (NO usa NETMON/1.0)</b></div>
+              <div className="card-b">
+                <div className="row">
+                  <input value={redServiceUrl} onChange={e => setRedServiceUrl(e.target.value)} style={{ flex: 1 }} placeholder="http://127.0.0.1:8090" />
+                </div>
+                <div className="row" style={{ marginTop: 8 }}>
+                  <input value={redSubnet} onChange={e => setRedSubnet(e.target.value)} style={{ width: 160 }} placeholder="192.168.1.0/24" />
+                  <button className="btn btn-primary" onClick={escanearRed} disabled={redCargando}>{redCargando ? 'Escaneando…' : 'Escanear LAN'}</button>
+                </div>
+                {redMetodo && <div className="hint" style={{ marginTop: 6 }}>Método: {redMetodo}</div>}
+                {redError && <div className="err" style={{ marginTop: 6 }}>{redError}</div>}
+                <div style={{ marginTop: 10, overflow: 'auto' }}>
+                  <table><thead><tr><th>IP</th><th>MAC</th><th>Hostname</th></tr></thead>
+                    <tbody>{redHosts.map(h => (
+                      <tr key={h.ip}><td>{h.ip}</td><td>{h.mac}</td><td>{h.hostname || '—'}</td></tr>))}</tbody></table>
+                </div>
+                {redHosts.length === 0 && !redCargando && !redError && <div className="hint" style={{ marginTop: 8 }}>Sin hosts. Ejecutá extras/lan_scan_service.py y pulsá "Escanear LAN".</div>}
+                <div className="hint" style={{ marginTop: 12, padding: 10, background: '#fff7e6', borderRadius: 8, lineHeight: 1.5 }}>
+                  <b>⚠️ Explicación para la defensa (formal):</b><br/>
+                  Esta sección NO utiliza el protocolo NETMON/1.0 ni los puertos UDP 5000 / TCP 5001 / WS 5003 del SDMR. Es un servicio HTTP auxiliar independiente (puerto 8090) para diagnóstico de red, aislado del monitoreo. El monitoreo de nodos sigue usando exclusivamente NETMON/1.0 sobre UDP/TCP/WebSocket. Si se solicita retirar esta funcionalidad extra, basta con eliminar la carpeta <code>extras/</code> y esta sección: el SDMR queda intacto.<br/><br/>
+                  <b>Para nosotros (comprensión):</b> el escaneo de red (ARP) no encaja en NETMON porque NETMON monitorea nodos que ya se registraron por telemetría UDP; descubrir hosts arbitrarios de la LAN es otra cosa (diagnóstico), por eso lo separamos en un servicio HTTP aparte. Así el core queda limpio y la cátedra puede pedirnos sacarlo sin tocar el protocolo ni los tests.
+                </div>
               </div></div>
           )}
 

@@ -59,6 +59,13 @@ from common.protocol import (
 )
 from client.contenido_ayuda import INSTRUCCIONES, CONCEPTOS, FUENTE_LIBRO
 
+try:
+    from extras.network_discovery import escanear_lan, detectar_subred, scapy_instalado
+except Exception:  # noqa: BLE001
+    escanear_lan = None
+    detectar_subred = (lambda: "192.168.1.0/24")
+    scapy_instalado = (lambda: False)
+
 # Límite de líneas retenidas en el log para no degradar la interfaz
 MAX_LOG_LINES = 2000
 
@@ -114,6 +121,12 @@ class SDMRMonitorGUI:
         self.salida_procesos = queue.Queue()
 
         # ---------------------------------------------------------
+        # Estado del escaneo de red (pestaña extra)
+        # ---------------------------------------------------------
+        self.salida_red_extra = queue.Queue()
+        self._red_extra_thread = None
+
+        # ---------------------------------------------------------
         # Estado de la actualización periódica
         # ---------------------------------------------------------
         self._poll_job = None
@@ -129,6 +142,7 @@ class SDMRMonitorGUI:
 
         # Planifica el drenaje de la salida de los procesos hijo.
         self.root.after(200, self._drenar_salida_procesos)
+        self.root.after(300, self._drenar_red_extra)
         self.root.protocol("WM_DELETE_WINDOW", self.cerrar)
 
         self._registrar("Sistema", "Dashboard listo. Pestaña 'Demo' para levantar todo con un clic.", "sys")
@@ -249,6 +263,7 @@ class SDMRMonitorGUI:
         self._construir_pestana_trafico()
         self._construir_pestana_instrucciones()
         self._construir_pestana_conceptos()
+        self._construir_pestana_red_extra()
 
         # ---------------- Barra de estado ----------------
         self.barra_estado = tk.StringVar(value="Desconectado")
@@ -436,17 +451,92 @@ class SDMRMonitorGUI:
             ayuda="Índice de la guía · el contenido es material del proyecto.",
         )
 
-    def _construir_pestana_conceptos(self):
+    def _construir_pestana_red_extra(self):
         """
-        Pestaña 5: definiciones de la bibliografía (Kurose). Sin conexión.
+        Pestaña EXTRA: descubrimiento de hosts en la LAN con Scapy (opcional).
+        Aislada del monitoreo SDMR: no usa server/agent/common.
         """
-        self._pestaña_ayuda(
-            titulo="Conceptos de red (TCP / UDP)",
-            items=CONCEPTOS,
-            ayuda="Definiciones tomadas literalmente de la bibliografía. "
-                  "Fuente: " + FUENTE_LIBRO,
-            con_buscador=True,
-        )
+        marco = ttk.Frame(self.notebook, padding=10)
+        self.notebook.add(marco, text="  Red (extra)  ")
+
+        ttk.Label(
+            marco,
+            text="Descubrimiento de hosts en la LAN (módulo EXTRA). "
+                 "Usa Scapy si está instalado (requiere Npcap + admin en Windows); "
+                 "si no, cae a 'arp -a' del sistema.",
+            style="Hint.TLabel", wraplength=900, justify="left",
+        ).pack(anchor="w", pady=(0, 8))
+
+        controles = ttk.Frame(marco)
+        controles.pack(fill="x", pady=(0, 8))
+
+        ttk.Label(controles, text="Subred (CIDR):").pack(side="left", padx=(0, 4))
+        self.entrada_subred = ttk.Entry(controles, width=20)
+        try:
+            self.entrada_subred.insert(0, detectar_subred() if detectar_subred else "192.168.1.0/24")
+        except Exception:
+            self.entrada_subred.insert(0, "192.168.1.0/24")
+        self.entrada_subred.pack(side="left", padx=(0, 8))
+
+        ttk.Button(controles, text="Escanear LAN", command=self._escanear_red).pack(side="left", padx=(0, 8))
+        self.etiqueta_red_estado = ttk.Label(controles, text="", style="Hint.TLabel")
+        self.etiqueta_red_estado.pack(side="left", padx=(8, 0))
+
+        ttk.Label(
+            marco,
+            text="Scapy instalado: " + ("SÍ" if scapy_instalado() else "NO (se usará fallback 'arp -a')"),
+            style="Hint.TLabel",
+        ).pack(anchor="w", pady=(0, 8))
+
+        # Tabla de hosts
+        marco_tabla = ttk.Frame(marco)
+        marco_tabla.pack(fill="both", expand=True)
+        columnas = ("ip", "mac", "hostname")
+        self.tabla_red = ttk.Treeview(marco_tabla, columns=columnas, show="headings")
+        titulos = {"ip": ("IP", 150, "w"), "mac": ("MAC", 170, "w"), "hostname": ("HOSTNAME", 260, "w")}
+        for clave, (titulo, ancho, ancla) in titulos.items():
+            self.tabla_red.heading(clave, text=titulo)
+            self.tabla_red.column(clave, width=ancho, anchor=ancla)
+        scroll = ttk.Scrollbar(marco_tabla, orient="vertical", command=self.tabla_red.yview)
+        self.tabla_red.configure(yscrollcommand=scroll.set)
+        self.tabla_red.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+
+    def _escanear_red(self):
+        if escanear_lan is None:
+            self.etiqueta_red_estado.config(text="Módulo extra no disponible.")
+            return
+        if self._red_extra_thread is not None and self._red_extra_thread.is_alive():
+            self.etiqueta_red_estado.config(text="Escaneo en curso...")
+            return
+        subred = self.entrada_subred.get().strip() or "192.168.1.0/24"
+        self.etiqueta_red_estado.config(text=f"Escaneando {subred}...")
+        self.tabla_red.delete(*self.tabla_red.get_children())
+
+        def tarea():
+            try:
+                hosts, metodo = escanear_lan(subred, usar_scapy=True)
+                self.salida_red_extra.put(("OK", hosts, metodo))
+            except Exception as e:  # noqa: BLE001
+                self.salida_red_extra.put(("ERR", str(e), ""))
+
+        self._red_extra_thread = threading.Thread(target=tarea, daemon=True)
+        self._red_extra_thread.start()
+
+    def _drenar_red_extra(self):
+        try:
+            while True:
+                tipo, payload, metodo = self.salida_red_extra.get_nowait()
+                if tipo == "OK":
+                    hosts = payload
+                    for h in hosts:
+                        self.tabla_red.insert("", "end", values=(h["ip"], h["mac"], h["hostname"]))
+                    self.etiqueta_red_estado.config(text=f"{len(hosts)} host(s) encontrados · método: {metodo}")
+                else:
+                    self.etiqueta_red_estado.config(text=f"Error: {payload}")
+        except queue.Empty:
+            pass
+        self.root.after(300, self._drenar_red_extra)
 
     def _pestaña_ayuda(self, titulo, items, ayuda, con_buscador=False):
         """
@@ -887,6 +977,9 @@ class SDMRMonitorGUI:
                 self.tabla_nodos.item(nid, tags=("nuevo",))
             except tk.TclError:
                 pass
+        # Se limpia para que el resaltado solo se aplique la primera vez
+        # que aparece cada nodo (no en cada repintado).
+        self._nodos_nuevos.clear()
 
         # El mensaje de estado vacio solo se ve cuando no hay nada que mostrar.
         if nodos:

@@ -18,6 +18,7 @@ Operaciones TCP soportadas:
 import socket
 import sys
 import os
+import re
 
 # Permitir importar el protocolo común
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -28,7 +29,8 @@ from common.protocol import (
     build_tcp_command,
     parse_tcp_response,
     encode_message,
-    TcpFrameReader
+    TcpFrameReader,
+    configurar_salida,
 )
 
 
@@ -184,12 +186,21 @@ class AdminClient:
         
         if len(parts) > 1 and parts[1]:
             for node_raw in parts[1:]:
-                # Formato: ID:IP:STATUS:CPU:RAM:DISK
+                # Formato: ID:IP:STATUS:CPU=x%:RAM=y%:DISK=z%[:LAST=Ns]
                 node_fields = node_raw.split(":")
-                if len(node_fields) >= 6:
-                    n_id, ip, status, cpu, ram, disk = node_fields[0], node_fields[1], node_fields[2], node_fields[3], node_fields[4], node_fields[5]
+                if len(node_fields) >= 3:
+                    n_id, ip, status = node_fields[0], node_fields[1], node_fields[2]
+                    metricas = {}
+                    for campo in node_fields[3:]:
+                        if "=" in campo:
+                            clave, valor = campo.split("=", 1)
+                            metricas[clave] = valor
+                    cpu = metricas.get("CPU", "?")
+                    ram = metricas.get("RAM", "?")
+                    disk = metricas.get("DISK", "?")
+                    last = metricas.get("LAST", "?")
                     status_icon = "🟢 ONLINE" if status == "OK" else ("⚠️ WARNING" if status == "WARNING" else "🔴 OFFLINE")
-                    print(f" NODO: {n_id:<12} | IP: {ip:<15} | Estado: {status_icon:<12} | {cpu} | {ram} | {disk}")
+                    print(f" NODO: {n_id:<12} | IP: {ip:<15} | Estado: {status_icon:<12} | CPU={cpu} | RAM={ram} | DISK={disk} | LAST={last}s")
         else:
             print(" No hay nodos registrados en este momento. Inicie un Agente UDP.")
         print("-----------------------------------------------------------------")
@@ -309,6 +320,7 @@ class AdminClient:
 
 
 if __name__ == "__main__":
+    configurar_salida()
     host_ip = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
     port_tcp = int(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_TCP_PORT
 

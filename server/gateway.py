@@ -43,7 +43,7 @@ except ImportError:
     print("ERROR: falta 'websockets'. Instala con: pip install websockets")
     sys.exit(1)
 
-from common.protocol import ENCODING, BUFFER_SIZE
+from common.protocol import ENCODING, BUFFER_SIZE, configurar_salida
 
 
 async def puente_ws_tcp(websocket, tcp_host: str, tcp_port: int):
@@ -126,6 +126,7 @@ async def main_async(ws_port: int, tcp_host: str, tcp_port: int):
 
 
 if __name__ == "__main__":
+    configurar_salida()
     ap = argparse.ArgumentParser(description="Gateway WS->TCP SDMR")
     ap.add_argument("ws_port", nargs="?", type=int, default=5003)
     ap.add_argument("tcp_host", nargs="?", default="127.0.0.1")

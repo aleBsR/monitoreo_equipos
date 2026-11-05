@@ -208,6 +208,13 @@ y `tcp.port == 5002` para ver el `EXECCMD` hacia el agente.
 - Los hilos son todos `daemon=True`; `is_running` es la bandera de apagado y
   `stop()` cierra ambos sockets.
 
+## Extras opcionales (aislados, no tocan el core SDMR)
+
+- `extras/network_discovery.py`: descubrimiento de hosts en la LAN (Scapy opcional + fallback `arp -a`).
+- `extras/lan_scan_service.py`: servicio HTTP auxiliar (puerto 8090) que expone el escaneo en JSON con CORS.
+- Pestaña "Red (extra)" en la GUI Tkinter y sección "Red (extra)" en la web React.
+- Todo esto es OPCIONAL y aislado: si se retira, el SDMR (NETMON/1.0) queda intacto. No usar estos módulos desde server/agent/common.
+
 ## Al tocar el código
 
 El servidor y el cliente comparten `BUFFER_SIZE` y `ENCODING` desde

@@ -35,6 +35,7 @@ Estructura de Mensajes:
 """
 
 import json
+import sys
 import time
 from collections import deque
 
@@ -432,7 +433,18 @@ class TcpFrameReader:
         """
         return self._frames.popleft()
 
-    def reset(self):
-        """Descarta el búfer y las tramas pendientes (conexión contaminada)."""
-        self._buffer = b""
-        self._frames.clear()
+def configurar_salida():
+    """
+    Reconfigura stdout/stderr a UTF-8 con reemplazo de caracteres no
+    codificables, para evitar UnicodeEncodeError en consolas Windows (cp1252).
+
+    Es seguro llamarla aunque los streams sean None (p. ej. pythonw.exe) o no
+    sean TextIOWrapper (p. ej. ya reemplazados por _SalidaNula).
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if stream is None:
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass

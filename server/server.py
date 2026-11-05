@@ -59,7 +59,8 @@ from common.protocol import (
     build_srv_info,
     es_trama_descubrimiento,
     TcpFrameReader,
-    FrameTooLongError
+    FrameTooLongError,
+    configurar_salida,
 )
 
 
@@ -522,6 +523,7 @@ class MonitoringServer:
 
 
 if __name__ == "__main__":
+    configurar_salida()
     # Permite especificar puertos desde la línea de comandos o usar los de defecto
     # Uso: python3 server/server.py [udp_port] [tcp_port] [segundos_purga_offline]
     udp_p = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_UDP_PORT

@@ -325,6 +325,23 @@ http://TU_IP:5173            # desde otro equipo o el celu
 *En el Login, campo **Gateway**: `ws://127.0.0.1:5003` (misma PC) o
 `ws://TU_IP:5003` (red). Usuario `admin` / `admin123`.*
 
+#### E. Servicio HTTP extra "Red (extra)" (opcional, NO usa NETMON/1.0)
+
+Servicio auxiliar para diagnóstico de red (descubrimiento de hosts en la LAN).
+Es INDEPENDIENTE del protocolo NETMON/1.0: no usa UDP 5000 / TCP 5001 / WS 5003
+y no toca el servidor central. Si se retira, el SDMR queda intacto.
+
+```bash
+# Terminal aparte, en el equipo servidor:
+python extras/lan_scan_service.py 8090
+```
+
+Luego abrí la web (http://TU_IP:5173) y andá a la pestaña **"Red (extra)"**:
+pone la subred (ej. 192.168.1.0/24) y pulsá "Escanear LAN". La sección muestra
+un texto explicativo para la defensa que aclara que NO usa NETMON/1.0.
+
+Requiere Scapy + Npcap solo si querés ARP scan real; si no, usa fallback `arp -a`.
+
 #### D. App móvil con Expo Go (celu/tablet Android)
 Requiere el gateway del paso 2 en marcha y el **puerto 8081 abierto**.
 ```bash
@@ -512,6 +529,7 @@ Incluye cinco pestañas:
 | **Tráfico NETMON/1.0** | Volcado de cada trama `TX`/`RX` tal cual viaja por el socket, más un campo para enviar tramas inválidas a propósito y ver cómo el servidor responde con `ERR_100` / `ERR_103` sin cortar la conexión (RF07). |
 | **Instrucciones de uso** | Guía integrada: inicio rápido, modo manual en tres terminales, pestañas, comandos `NETMON/1.0`, puertos, pruebas y problemas frecuentes. |
 | **Conceptos TCP/UDP** | Definiciones de la bibliografía (Kurose, 5.ª ed.) con buscador: protocolo, socket, cliente/servidor, TCP, UDP, segmento/datagrama, multiplexación, puertos, control de flujo y handshake. Cada una indica capítulo y página. |
+| **Red (extra)** | Descubrimiento de hosts en la LAN (Scapy opcional con fallback a `arp -a`): IP, MAC y hostname. Módulo aislado en `extras/`, no toca el core SDMR. |
 
 El texto de las dos últimas pestañas vive en `client/contenido_ayuda.py`
 (`INSTRUCCIONES` y `CONCEPTOS`): las definiciones están copiadas literalmente

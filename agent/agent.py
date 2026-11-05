@@ -63,7 +63,8 @@ from common.protocol import (
     build_srv_request,
     parse_srv_info,
     TcpFrameReader,
-    FrameTooLongError
+    FrameTooLongError,
+    configurar_salida,
 )
 
 # Comandos administrativos que el agente acepta ejecutar (lista permitida).
@@ -658,6 +659,8 @@ def main():
          Lee agent/config.ini y, si no hay IP, descubre el servidor por broadcast.
     """
     global MODO_SILENCIO
+
+    configurar_salida()
 
     # pythonw.exe no tiene consola: redirigir antes de cualquier print()
     _asegurar_salida()

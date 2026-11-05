@@ -28,6 +28,7 @@ import threading
 import time
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from common.protocol import configurar_salida
 from client.admin_client import AdminClient
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -217,6 +218,24 @@ def prueba_4_datos_invalidos(tcp_port: int):
     cli.close()
 
 
+def prueba_udp_malformado(udp_port: int, tcp_port: int):
+    print("\n[Prueba UDP] Telemetría malformada no tumba al servidor (RF07)")
+    # Datarama inválido: métrica fuera de rango y cabecera incorrecta
+    for payload in (b"MON|NODO_X|127.0.0.1|150|10|10|OK", b"HOLA|basura"):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.sendto(payload, ("127.0.0.1", udp_port))
+            s.close()
+        except OSError as e:
+            print(f"    Error enviando UDP: {e}")
+    time.sleep(0.5)
+
+    cli = _cliente_autenticado(tcp_port)
+    resp = cli.send_command("PING")
+    check("Servidor sigue vivo tras UDP malformado", resp["payload_or_code"] == "PONG")
+    cli.close()
+
+
 def prueba_5_servidor_no_disponible():
     print("\n[Prueba 5] Servidor no disponible")
     tcp_libre, _ = _puertos_libres()
@@ -337,6 +356,7 @@ def prueba_8_concurrencia(tcp_port: int):
 # =============================================================================
 
 def run_integration_test() -> int:
+    configurar_salida()
     print("=================================================================")
     print(" PRUEBAS DE INTEGRACIÓN AUTOMATIZADAS (SDMR / NETMON 1.0)")
     print("=================================================================")
@@ -373,6 +393,7 @@ def run_integration_test() -> int:
         prueba_2_multiples_clientes(tcp_port)
         prueba_3_desconexion(tcp_port)
         prueba_4_datos_invalidos(tcp_port)
+        prueba_udp_malformado(udp_port, tcp_port)
         prueba_5_servidor_no_disponible()
         prueba_6_encuadrado_tcp(tcp_port)
         prueba_8_concurrencia(tcp_port)

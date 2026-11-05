@@ -284,7 +284,7 @@ Lado UDP — todo se descarta en silencio, solo un print:
 | `MON\|NODO_01\|1.2.3.4\|abc\|62\|40\|OK` | descartado: no es float |
 | `MON\|NODO_01` | descartado: menos de 7 campos |
 | `HOLA\|...` | descartado: cabecera incorrecta |
-| `MON\|\|1.2.3.4\|1\|1\|1\|OK` | **aceptado con id vacío** — hueco de validación |
+| `MON\|\|1.2.3.4\|1\|1\|1\|OK` | **rechazado**: `ERR`/`ValueError` (id de nodo vacío) |
 
 Framing TCP — el acumulador (`TcpFrameReader`) hace la separación:
 
