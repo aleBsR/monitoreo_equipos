@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SDMR · Centro de Control</title>
+<style>
+  /* Mismo tema NOC que la web (web/src/styles.css) */
+  :root{
+    --bg:#0B1220; --bg-soft:#0F172A; --card:#111C2E; --card-2:#16233A;
+    --line:#1E293B; --line-soft:#243449;
+    --ink:#E2E8F0; --ink-strong:#F8FAFC; --muted:#94A3B8;
+    --accent:#00E5FF; --accent-2:#3B82F6;
+    --ok:#10B981; --warn:#F59E0B; --off:#EF4444;
+    --grad:linear-gradient(120deg,#00E5FF,#3B82F6);
+    --grad-soft:linear-gradient(120deg,rgba(0,229,255,.18),rgba(59,130,246,.18));
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 20% -10%,#12213b 0%,var(--bg) 55%) fixed;color:var(--ink);font-family:-apple-system,"Segoe UI",Roboto,Inter,Arial,sans-serif;min-height:100vh}
+  .topbar{position:sticky;top:0;z-index:10;background:rgba(11,18,32,.86);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .topbar-inner{max-width:760px;margin:0 auto;display:flex;align-items:center;gap:12px;padding:12px 16px}
+  .logo{font-weight:800;font-size:20px;letter-spacing:.5px;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{font-size:12px;color:var(--muted)}
+  .pill{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:5px 12px;color:var(--muted);background:var(--bg-soft);display:inline-flex;align-items:center;gap:7px}
+  .pill b{color:var(--ink-strong)}
+  .wrap{max-width:760px;margin:0 auto;padding:16px;display:flex;flex-direction:column;gap:14px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+  .svc{display:flex;align-items:center;gap:14px;padding:14px 16px;border-bottom:1px solid var(--line)}
+  .svc:last-child{border-bottom:0}
+  .svc-ico{width:44px;height:44px;flex:0 0 auto;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;background:var(--grad-soft);border:1px solid var(--line-soft)}
+  .svc-info{min-width:0;flex:1}
+  .svc-info b{display:block;color:var(--ink-strong);font-size:15px}
+  .svc-estado{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:7px;margin-top:2px}
+  .dot{width:10px;height:10px;border-radius:50%;flex:0 0 auto;background:#475569}
+  .dot.on{background:var(--ok);box-shadow:0 0 0 4px rgba(16,185,129,.18)}
+  .dot.off{background:#475569}
+  .dot.warn{background:var(--warn);box-shadow:0 0 0 4px rgba(245,158,11,.18)}
+  .svc-acc{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}
+  .hint-web{font-size:11px;color:var(--warn);margin-top:3px}
+  .steppers{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:3px 6px;background:var(--bg-soft);margin-right:4px}
+  .steppers b{color:var(--ink-strong);min-width:18px;text-align:center}
+  button{font-family:inherit;font-size:14px;border:0;border-radius:10px;padding:8px 13px;cursor:pointer;font-weight:800;transition:transform .12s ease,filter .12s ease,background .12s ease}
+  button:hover{filter:brightness(1.08)}
+  button:active{transform:translateY(1px)}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .btn-on{background:var(--grad);color:#04121c}
+  .btn-off{background:#2a1520;color:#fca5a5;border:1px solid rgba(239,68,68,.4)}
+  .btn-ghost{background:var(--card-2);color:var(--ink)}
+  .btn-sm{padding:6px 10px;font-size:13px}
+  .barra{display:flex;gap:12px}
+  .barra button{flex:1;padding:14px;font-size:15px}
+  .b-todo-on{background:var(--grad);color:#04121c}
+  .b-todo-off{background:#2a1520;color:#fca5a5;border:1px solid rgba(239,68,68,.45)}
+  .foot{font-size:11px;color:var(--muted);text-align:center;line-height:1.5;padding:4px 8px}
+  .foot code{font-family:Consolas,monospace;background:#0a1422;border:1px solid var(--line-soft);border-radius:6px;padding:1px 6px}
+  /* Modal de log */
+  .modal{position:fixed;inset:0;background:rgba(5,10,20,.72);display:none;align-items:center;justify-content:center;padding:16px;z-index:50}
+  .modal.show{display:flex}
+  .modal-box{background:var(--card);border:1px solid var(--line);border-radius:16px;max-width:760px;width:100%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+  .modal-h{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--line);color:var(--ink-strong);font-weight:800}
+  .modal-h button{margin-left:auto}
+  .modal-log{font-family:Consolas,monospace;font-size:12px;color:#cbd5e1;background:#060d18;margin:0;padding:14px;overflow:auto;white-space:pre-wrap;border-radius:0 0 16px 16px;flex:1}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+  <div class="topbar"><div class="topbar-inner">
+    <div><div class="logo">SDMR</div><div class="sub">Centro de Control</div></div>
+    <span style="flex:1"></span>
+    <span class="pill"><span id="dot-global" class="dot"></span><span id="txt-global">conectando…</span></span>
+  </div></div>
+
+  <div class="wrap">
+    <div class="card" id="servicios"></div>
+
+    <div class="barra">
+      <button class="b-todo-on" onclick="encenderTodo()">⚡ Encender TODO</button>
+      <button class="b-todo-off" onclick="apagarTodo()">⛔ Apagar TODO</button>
+    </div>
+
+    <div class="foot">
+      Herramienta local, escucha solo en <code>127.0.0.1:7070</code>. Aislada del core: si se borra, el SDMR queda intacto.<br/>
+      El monitoreo real sigue usando NETMON/1.0 (UDP 5000 · TCP 5001 · WS 5003).
+    </div>
+  </div>
+
+  <div class="modal" id="modal" onclick="if(event.target===this)cerrarLog()">
+    <div class="modal-box">
+      <div class="modal-h"><span id="modal-titulo">Log</span><button class="btn-ghost btn-sm" onclick="cerrarLog()">Cerrar</button></div>
+      <pre class="modal-log" id="modal-log">—</pre>
+    </div>
+  </div>
+
+<script>
+  const ORDEN = ['servidor', 'gateway', 'web', 'escaneo', 'agentes'];
+  let nAgentes = 2;
+  let ultimo = null;
+
+  async function pedir(metodo, url) {
+    try {
+      // El header custom es la defensa anti-CSRF del servidor (fuerza preflight
+      // a cualquier origen distinto, que el panel no aprueba).
+      const res = await fetch(url, { method: metodo, headers: { 'X-SDMR-Control': '1' } });
+      const data = await res.json();
+      if (data.servicios) { ultimo = data.servicios; render(); }
+      return data;
+    } catch (e) { marcarDesconectado(); }
+  }
+
+  function iniciar(svc) {
+    const extra = svc === 'agentes' ? `&n=${nAgentes}` : '';
+    pedir('POST', `/iniciar?svc=${svc}${extra}`);
+  }
+  function detener(svc) { pedir('POST', `/detener?svc=${svc}`); }
+  function encenderTodo() { pedir('POST', `/encender-todo?n=${nAgentes}`); }
+  function apagarTodo() { pedir('POST', `/apagar-todo`); }
+  function masAgentes() { nAgentes = Math.min(8, nAgentes + 1); render(); }
+  function menosAgentes() { nAgentes = Math.max(1, nAgentes - 1); render(); }
+
+  async function verLog(svc) {
+    document.getElementById('modal-titulo').textContent = 'Log · ' + (ultimo?.[svc]?.nombre || svc);
+    document.getElementById('modal-log').textContent = 'Cargando…';
+    document.getElementById('modal').classList.add('show');
+    try {
+      const res = await fetch(`/log?svc=${svc}`);
+      const data = await res.json();
+      document.getElementById('modal-log').textContent = (data.log || '').trim() || '(sin registros todavía)';
+    } catch (e) { document.getElementById('modal-log').textContent = 'No se pudo leer el log.'; }
+  }
+  function cerrarLog() { document.getElementById('modal').classList.remove('show'); }
+
+  function marcarDesconectado() {
+    const d = document.getElementById('dot-global'); d.className = 'dot off';
+    document.getElementById('txt-global').textContent = 'panel sin conexión';
+  }
+
+  function render() {
+    if (!ultimo) return;
+    const cont = document.getElementById('servicios');
+    cont.innerHTML = ORDEN.map(clave => {
+      const s = ultimo[clave]; if (!s) return '';
+      const on = s.corriendo;
+      const clasePunto = on ? 'on' : 'off';
+      const estadoTxt = on ? (s.pids && s.pids.length ? `corriendo · ${s.pids.length} proc` : 'corriendo') : 'parado';
+      const controlN = clave === 'agentes'
+        ? `<span class="steppers"><button class="btn-ghost btn-sm" onclick="menosAgentes()">–</button><b>${nAgentes}</b><button class="btn-ghost btn-sm" onclick="masAgentes()">+</button></span>`
+        : '';
+      const pistaWeb = (clave === 'web' && s.falta_build)
+        ? `<div class="hint-web">⚠ falta el build: <code>cd web &amp;&amp; npm run build</code></div>` : '';
+      return `
+        <div class="svc">
+          <div class="svc-ico">${s.icono || '•'}</div>
+          <div class="svc-info">
+            <b>${s.nombre}</b>
+            <div class="svc-estado"><span class="dot ${clasePunto}"></span>${estadoTxt}${s.puerto ? ' · :' + s.puerto : ''}</div>
+            ${pistaWeb}
+          </div>
+          <div class="svc-acc">
+            ${controlN}
+            <button class="btn-on btn-sm" onclick="iniciar('${clave}')">Iniciar</button>
+            <button class="btn-off btn-sm" onclick="detener('${clave}')">Detener</button>
+            <button class="btn-ghost btn-sm" onclick="verLog('${clave}')">Log</button>
+          </div>
+        </div>`;
+    }).join('');
+
+    // Luz global
+    const activos = ORDEN.filter(k => ultimo[k] && ultimo[k].corriendo).length;
+    const d = document.getElementById('dot-global');
+    d.className = 'dot ' + (activos === ORDEN.length ? 'on' : activos === 0 ? 'off' : 'warn');
+    document.getElementById('txt-global').innerHTML = `<b>${activos}</b>/${ORDEN.length} activos`;
+  }
+
+  async function poll() { await pedir('GET', '/estado'); }
+  poll();
+  setInterval(poll, 2000);
+</script>
+</body>
+</html>
