@@ -11,6 +11,28 @@ function estadoClase(e) {
   return 'off'
 }
 
+// Íconos e inferencia de tipo para la pestaña "Red (extra)". El escaneo ARP no
+// dice qué es cada equipo, así que se deduce del fabricante (OUI) y el hostname.
+const LAN_ICONOS = { printer: '🖨️', router: '🛜', server: '🖥️', phone: '📱', computer: '💻', unknown: '🔌' }
+const LAN_REGLAS = [
+  [/printer|epson|canon|brother|kyocera|lexmark|impres|print/i, 'printer'],
+  [/router|switch|tp-?link|mikrotik|ubiquiti|cisco|d-?link|netgear|aruba|gateway|zte|mercusys/i, 'router'],
+  [/server|srv|nas|synology|qnap|vmware|proxmox|esxi/i, 'server'],
+  [/iphone|ipad|android|phone|galaxy|redmi|xiaomi|huawei|oppo|vivo|oneplus|motorola|realme|movil|celular/i, 'phone'],
+  [/apple|intel|dell|lenovo|asus|acer|msi|microsoft|\bpc\b|laptop|desktop|notebook/i, 'computer'],
+]
+function tipoHost(h) {
+  const s = `${h.vendor || ''} ${h.hostname || ''}`
+  for (const [re, t] of LAN_REGLAS) if (re.test(s)) return t
+  return 'unknown'
+}
+function latClase(ms) {
+  if (ms == null) return ''
+  if (ms < 30) return 'ok'
+  if (ms < 100) return 'warn'
+  return 'off'
+}
+
 function Login({ onOk }) {
   const [gw, setGw] = useState('ws://127.0.0.1:5003')
   const [user, setUser] = useState('admin')
@@ -302,31 +324,91 @@ export default function App() {
               </div></div>
           )}
 
-          {tab === 'redextra' && (
-            <div className="card"><div className="card-h"><b>Red (extra) — descubrimiento de hosts (NO usa NETMON/1.0)</b></div>
+          {tab === 'redextra' && (() => {
+            const vivos = redHosts.filter(h => h.alive !== false).length
+            return (
+            <div className="card">
+              <div className="card-h">
+                <span className="lan-ico-h">🌐</span>
+                <div><b>Red (extra) — descubrimiento de hosts</b><div className="hint">Escaneo ARP + fabricante (OUI) + ping · NO usa NETMON/1.0</div></div>
+              </div>
               <div className="card-b">
-                <div className="row">
-                  <input value={redServiceUrl} onChange={e => setRedServiceUrl(e.target.value)} style={{ flex: 1 }} placeholder="http://127.0.0.1:8090" />
+                <div className="lan-toolbar">
+                  <label className="lan-field">
+                    <span>Servicio HTTP extra</span>
+                    <input value={redServiceUrl} onChange={e => setRedServiceUrl(e.target.value)} placeholder="http://127.0.0.1:8090" />
+                  </label>
+                  <label className="lan-field" style={{ flex: '0 0 170px' }}>
+                    <span>Subred (CIDR)</span>
+                    <input value={redSubnet} onChange={e => setRedSubnet(e.target.value)} placeholder="192.168.1.0/24" />
+                  </label>
+                  <button className="btn btn-primary" onClick={escanearRed} disabled={redCargando}>
+                    {redCargando ? '⏳ Escaneando…' : '🔍 Escanear LAN'}
+                  </button>
                 </div>
-                <div className="row" style={{ marginTop: 8 }}>
-                  <input value={redSubnet} onChange={e => setRedSubnet(e.target.value)} style={{ width: 160 }} placeholder="192.168.1.0/24" />
-                  <button className="btn btn-primary" onClick={escanearRed} disabled={redCargando}>{redCargando ? 'Escaneando…' : 'Escanear LAN'}</button>
-                </div>
-                {redMetodo && <div className="hint" style={{ marginTop: 6 }}>Método: {redMetodo}</div>}
-                {redError && <div className="err" style={{ marginTop: 6 }}>{redError}</div>}
-                <div style={{ marginTop: 10, overflow: 'auto' }}>
-                  <table><thead><tr><th>IP</th><th>MAC</th><th>Hostname</th></tr></thead>
-                    <tbody>{redHosts.map(h => (
-                      <tr key={h.ip}><td>{h.ip}</td><td>{h.mac}</td><td>{h.hostname || '—'}</td></tr>))}</tbody></table>
-                </div>
-                {redHosts.length === 0 && !redCargando && !redError && <div className="hint" style={{ marginTop: 8 }}>Sin hosts. Ejecutá extras/lan_scan_service.py y pulsá "Escanear LAN".</div>}
-                <div className="hint" style={{ marginTop: 12, padding: 10, background: 'rgba(245,158,11,.10)', border: '1px solid rgba(245,158,11,.35)', color: '#E2E8F0', borderRadius: 8, lineHeight: 1.5 }}>
-                  <b>⚠️ Explicación para la defensa (formal):</b><br/>
-                  Esta sección NO utiliza el protocolo NETMON/1.0 ni los puertos UDP 5000 / TCP 5001 / WS 5003 del SDMR. Es un servicio HTTP auxiliar independiente (puerto 8090) para diagnóstico de red, aislado del monitoreo. El monitoreo de nodos sigue usando exclusivamente NETMON/1.0 sobre UDP/TCP/WebSocket. Si se solicita retirar esta funcionalidad extra, basta con eliminar la carpeta <code>extras/</code> y esta sección: el SDMR queda intacto.<br/><br/>
-                  <b>Para nosotros (comprensión):</b> el escaneo de red (ARP) no encaja en NETMON porque NETMON monitorea nodos que ya se registraron por telemetría UDP; descubrir hosts arbitrarios de la LAN es otra cosa (diagnóstico), por eso lo separamos en un servicio HTTP aparte. Así el core queda limpio y la cátedra puede pedirnos sacarlo sin tocar el protocolo ni los tests.
-                </div>
-              </div></div>
-          )}
+
+                {(redHosts.length > 0 || (redMetodo && !redCargando)) && (
+                  <div className="lan-stats">
+                    <div className="lan-stat"><b>{redHosts.length}</b><span>hosts</span></div>
+                    <div className="lan-stat"><b style={{ color: 'var(--ok)' }}>{vivos}</b><span>responden</span></div>
+                    <div className="lan-stat lan-stat-wide"><b className="lan-metodo">{redMetodo || '—'}</b><span>método</span></div>
+                  </div>
+                )}
+
+                {redError && <div className="err" style={{ marginTop: 12 }}>{redError}</div>}
+
+                {redCargando && redHosts.length === 0 && <div className="lan-skeleton" />}
+
+                {redHosts.length > 0 && (
+                  <div className="lan-grid">
+                    {redHosts.map(h => {
+                      const t = tipoHost(h)
+                      const vivo = h.alive !== false
+                      const lat = h.latency_ms
+                      return (
+                        <div className={'lan-host' + (vivo ? '' : ' lan-host-off')} key={h.ip + h.mac}>
+                          <div className="lan-host-top">
+                            <span className="lan-ico" title={t}>{LAN_ICONOS[t]}</span>
+                            <div className="lan-host-id">
+                              <b>{h.ip}</b>
+                              <span className="lan-vendor" title={h.vendor || ''}>{h.vendor || 'Fabricante desconocido'}</span>
+                            </div>
+                            <span className={'lan-dot ' + (vivo ? 'on' : 'off')} title={vivo ? 'Responde al ping' : 'Sin respuesta'} />
+                          </div>
+                          <div className="lan-rows">
+                            <div className="lan-r"><span>MAC</span><code>{h.mac}</code></div>
+                            <div className="lan-r"><span>Host</span><b title={h.hostname || ''}>{h.hostname || '—'}</b></div>
+                            <div className="lan-r"><span>Ping</span>
+                              {vivo
+                                ? <span className={'lan-lat ' + latClase(lat)}>{lat == null ? 'OK' : lat + ' ms'}</span>
+                                : <span className="lan-lat off">sin respuesta</span>}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {redHosts.length === 0 && !redCargando && !redError && (
+                  <div className="lan-empty">
+                    <div className="lan-empty-ico">📡</div>
+                    <b>Sin hosts todavía</b>
+                    <span className="hint">Ejecutá <code>extras/lan_scan_service.py</code> y pulsá <b>"Escanear LAN"</b>.</span>
+                  </div>
+                )}
+
+                <details className="lan-nota">
+                  <summary>⚠️ Explicación para la defensa</summary>
+                  <div>
+                    <b>Formal:</b> Esta sección NO utiliza el protocolo NETMON/1.0 ni los puertos UDP 5000 / TCP 5001 / WS 5003 del SDMR. Es un servicio HTTP auxiliar independiente (puerto 8090) para diagnóstico de red, aislado del monitoreo. El monitoreo de nodos sigue usando exclusivamente NETMON/1.0 sobre UDP/TCP/WebSocket. Si se solicita retirar esta funcionalidad extra, basta con eliminar la carpeta <code>extras/</code> y esta sección: el SDMR queda intacto.<br /><br />
+                    <b>Por qué solo muestra IP/MAC/fabricante/ping y no CPU/RAM/Disco:</b> esas métricas son internas del sistema operativo de cada equipo y no se pueden observar desde la red sin un proceso corriendo EN el equipo (el agente SDMR). El descubrimiento solo ve lo que el host expone hacia afuera: su presencia (ARP), su fabricante (OUI de la MAC) y si responde (ping). Por eso descubrimiento y monitoreo son capas complementarias, no una sustituto de la otra.
+                  </div>
+                </details>
+              </div>
+            </div>
+            )
+          })()}
 
           {tab === 'ayuda' && (
             <div className="card"><div className="card-h"><b>Ayuda hotspot 📱</b></div>

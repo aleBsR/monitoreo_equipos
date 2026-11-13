@@ -11,7 +11,8 @@ Uso:
 
 Endpoints:
     GET /                 -> info del servicio + subred sugerida
-    GET /scan?subnet=CIDR -> { subnet, method, scapy_installed, hosts:[{ip,mac,hostname}] }
+    GET /scan?subnet=CIDR -> { subnet, method, scapy_installed,
+                               hosts:[{ip,mac,vendor,hostname,alive,latency_ms}] }
 
 CORS habilitado para que la web (otro origen/puerto) pueda consumirlo.
 

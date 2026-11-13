@@ -124,12 +124,14 @@ juntos. Servidor, cliente y agente separan las tramas con un acumulador común
 │   ├── scripts/crear_acceso_directo.bat # Acceso directo del Escritorio (Windows)
 │   ├── scripts/agente_remoto.bat / .sh # Agente apuntando a otro equipo (red local)
 │   ├── sdmr                 #   Lanzador Linux: dashboard + demo
-│   └── instalar.sh          #   Instalador Linux (comando global 'sdmr' + menú)
+│   ├── instalar.sh          #   Instalador Linux (comando global 'sdmr' + menú)
+│   ├── centro_control.py/.sh/.bat   # Centro de Control: panel web local para todo el stack
+│   └── crear_acceso_control.sh/.bat # Icono del Centro de Control (Linux/Windows)
 ├── tools/
 │   ├── verificar_red.py     # Diagnóstico TCP + UDP + WS (gateway) hacia el servidor
 │   └── test_system.py       # Pruebas de integración automatizadas
 ├── docs/                    # Propuesta, bibliografía (Kurose PDF) y consigna del TP
-│   └── propuesta_tpi.md     #   (propuesta.md, .ppt y .pdf en la misma carpeta)
+│   └── propuesta.md         #   (.ppt y .pdf de la cátedra en la misma carpeta)
 ├── requirements.txt         # psutil (métricas reales) + websockets (gateway)
 └── LEEME_OTRA_PC.md         # Guía corta para replicar el entorno en otra PC
 ```
@@ -174,6 +176,23 @@ Si preferís no instalar nada global, `./scripts/sdmr` funciona igual desde la c
 
 > El lanzador abre la pestaña **Demo**, que levanta el servidor y los agentes
 > como procesos hijo y conecta el dashboard automáticamente.
+
+#### 🎛️ Centro de Control (panel en el navegador)
+
+Para prender/apagar **todo el stack** (servidor, gateway, web, escaneo y agentes)
+desde un panel con botones y luces de estado —con el mismo estilo que la web—,
+sin abrir terminales:
+
+```bash
+./scripts/centro_control.sh            # abre el panel en http://127.0.0.1:7070
+./scripts/crear_acceso_control.sh      # (una vez) deja el icono "SDMR Centro de Control"
+```
+En Windows: `scripts/centro_control.bat` y, para el icono del Escritorio,
+`scripts/crear_acceso_control.bat`.
+
+Es una **herramienta local y aislada**: escucha solo en `127.0.0.1` (puede lanzar
+procesos, no debe exponerse a la red) y no toca el core — si se borra, el SDMR
+queda intacto. El monitoreo real sigue usando NETMON/1.0.
 
 ---
 
