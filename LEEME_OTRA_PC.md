@@ -77,3 +77,15 @@ Si no se pasa la IP del servidor, el agente la descubre solo por broadcast
 (SRVREQ -> SRVINFO). En el dashboard del administrador, pestana Nodos ->
 boton "Copiar comando para clientes" copia el comando de instalacion con la IP
 del servidor al que esta conectado.
+
+### Alternativa con botón (sin terminal)
+
+Si solo querés correr un agente apuntado a otra PC, con un botón:
+
+```bash
+./scripts/agent/crear_accesos.sh        # Windows: scripts\agent\crear_accesos.bat  (una vez)
+```
+
+Después, doble clic en el icono **"SDMR Control Agente"**: escribí la **IP del
+servidor** en el campo *Servidor (IP)* y tocá **Iniciar** (vacío = descubrir por
+broadcast). La IP queda recordada en `agent/config.ini`.

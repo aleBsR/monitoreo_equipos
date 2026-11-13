@@ -78,9 +78,12 @@ usar el `5002`. En el otro equipo también sirven los lanzadores
 cliente ejecutá una sola vez `scripts/agent/crear_accesos.sh` (Linux) o
 `scripts\agent\crear_accesos.bat` (Windows) para dejar un acceso directo en
 el Escritorio. A partir de ahí, doble clic en "SDMR Control Agente" abre una
-ventanita con botones **Iniciar / Detener / Estado / Abrir log** que controla
-el agente en esa misma máquina (arranca oculto con `--silent`). También se
-puede abrir manualmente:
+ventanita (tema oscuro) con un campo **Servidor (IP)** —escribí ahí la IP del
+equipo donde corre el servidor para apuntar el agente a **otra PC de la red**;
+si lo dejás vacío, lo descubre solo por broadcast—, un campo **ID del nodo**
+opcional, y los botones **Iniciar / Detener / Estado / Abrir log**. La IP queda
+guardada en `agent/config.ini`, así la próxima vez ya aparece. El agente
+arranca oculto. También se puede abrir manualmente:
 ```bash
 python scripts/agent/agent_control.py
 ```
@@ -243,6 +246,12 @@ scripts/agente_remoto.bat 192.168.1.50 NODO_02
 El ID de nodo es opcional (por defecto usa el hostname del equipo); el puerto
 UDP por defecto es `5000` y el del canal `EXEC` es `5002`. Sintaxis completa:
 `<IP_SERVIDOR> [ID_NODO] [PUERTO_UDP] [PUERTO_CMD]`.
+
+> **Sin terminal (con un botón):** en el otro equipo corré una vez
+> `scripts/agent/crear_accesos.sh` (o `scripts\agent\crear_accesos.bat`), abrí
+> el icono **"SDMR Control Agente"**, escribí la IP del servidor (ej.
+> `192.168.1.50`) en el campo **Servidor (IP)** y tocá **Iniciar**. La IP queda
+> recordada para la próxima vez.
 
 Si preferís el comando manual, es el mismo de siempre pero con la IP del
 servidor:
