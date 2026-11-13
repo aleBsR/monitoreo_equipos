@@ -29,7 +29,6 @@ mediante datagramas UDP (socket no orientado a conexión).
 
 import argparse
 import configparser
-import io
 import os
 import socket
 import sys
@@ -693,10 +692,13 @@ def main():
 
     config = leer_config(args.config)
 
-    # Precedencia: argumentos de línea de comandos > config.ini > posición clásica > defecto
+    # Precedencia (coherente con los puertos de abajo):
+    # flag explícito (--id/--ip) > argumento posicional > config.ini > defecto.
+    # Así, al invocar la forma clásica `agent.py NODO 10.26.3.19 ...`, la IP
+    # posicional pisa a un `ip_servidor` que haya quedado fijo en config.ini.
     posicionales = args.posicionales
-    id_nodo = args.id_nodo or config["id_nodo"] or (posicionales[0] if len(posicionales) > 0 else None)
-    ip_servidor = args.ip_servidor or config["ip_servidor"] or (posicionales[1] if len(posicionales) > 1 else None)
+    id_nodo = args.id_nodo or (posicionales[0] if len(posicionales) > 0 else None) or config["id_nodo"]
+    ip_servidor = args.ip_servidor or (posicionales[1] if len(posicionales) > 1 else None) or config["ip_servidor"]
 
     try:
         puerto_udp = args.udp or (int(posicionales[2]) if len(posicionales) > 2 else config["puerto_udp"])
