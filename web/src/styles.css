@@ -104,6 +104,52 @@ button.btn:active{transform:translateY(1px)}
 .topo-legend .dot{margin-right:6px;vertical-align:middle}
 .topo-legend .hint{margin-top:2px}
 
+/* ===== Red (extra): descubrimiento de hosts en la LAN ===== */
+.lan-ico-h{font-size:22px;filter:drop-shadow(0 2px 6px rgba(0,229,255,.35))}
+.lan-toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.lan-field{display:flex;flex-direction:column;gap:5px;flex:1;min-width:150px}
+.lan-field > span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.lan-field input{width:100%}
+.lan-stats{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+.lan-stat{flex:1;min-width:92px;border:1px solid var(--line);border-radius:14px;padding:10px 12px;text-align:center;background:var(--bg-soft)}
+.lan-stat b{font-size:20px;display:block;color:var(--ink-strong)}
+.lan-stat span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.lan-stat-wide{flex:2.4;min-width:160px}
+.lan-metodo{font-size:13px !important;font-weight:700;color:var(--accent) !important;word-break:break-word;line-height:1.3}
+.lan-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:12px;margin-top:14px}
+.lan-host{background:var(--bg-soft);border:1px solid var(--line);border-radius:14px;padding:12px;transition:border-color .15s ease,transform .15s ease,box-shadow .15s ease}
+.lan-host:hover{border-color:var(--line-soft);transform:translateY(-2px);box-shadow:0 10px 24px rgba(0,0,0,.28)}
+.lan-host-off{opacity:.6}
+.lan-host-top{display:flex;align-items:center;gap:10px}
+.lan-ico{width:40px;height:40px;flex:0 0 auto;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;background:var(--grad-soft);border:1px solid var(--line-soft)}
+.lan-host-id{min-width:0;flex:1}
+.lan-host-id b{display:block;color:var(--ink-strong);font-size:15px;line-height:1.2;font-variant-numeric:tabular-nums}
+.lan-vendor{display:block;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lan-dot{width:11px;height:11px;border-radius:50%;flex:0 0 auto}
+.lan-dot.on{background:var(--ok);box-shadow:0 0 0 4px rgba(16,185,129,.18)}
+.lan-dot.off{background:#475569}
+.lan-rows{margin-top:10px;display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:10px}
+.lan-r{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px}
+.lan-r > span:first-child{color:var(--muted);text-transform:uppercase;font-size:10px;letter-spacing:.5px}
+.lan-r code{font-family:Consolas,monospace;font-size:12px;color:var(--ink);background:#0a1422;border:1px solid var(--line-soft);border-radius:6px;padding:2px 7px}
+.lan-r b{color:var(--ink-strong);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lan-lat{font-weight:800;font-size:11px;padding:2px 9px;border-radius:999px;background:var(--card-2);color:var(--ink)}
+.lan-lat.ok{background:rgba(16,185,129,.16);color:#6ee7b7}
+.lan-lat.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.lan-lat.off{background:rgba(239,68,68,.14);color:#fca5a5}
+.lan-empty{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;padding:30px 16px;margin-top:14px;border:1px dashed var(--line-soft);border-radius:14px;background:var(--bg-soft)}
+.lan-empty-ico{font-size:34px;opacity:.7}
+.lan-empty b{color:var(--ink-strong)}
+.lan-empty code,.lan-nota code{font-family:Consolas,monospace;background:#0a1422;border:1px solid var(--line-soft);border-radius:6px;padding:1px 6px}
+.lan-skeleton{margin-top:14px;height:120px;border-radius:14px;background:linear-gradient(90deg,var(--bg-soft),var(--card-2),var(--bg-soft));background-size:200% 100%;animation:lan-shimmer 1.2s linear infinite}
+@keyframes lan-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.lan-nota{margin-top:14px;border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.08);border-radius:12px;overflow:hidden}
+.lan-nota summary{cursor:pointer;padding:10px 12px;font-weight:700;color:#fcd34d;font-size:13px;list-style:none;user-select:none}
+.lan-nota summary::-webkit-details-marker{display:none}
+.lan-nota summary::before{content:'▸ ';color:#fcd34d}
+.lan-nota[open] summary::before{content:'▾ '}
+.lan-nota > div{padding:0 14px 14px;font-size:12px;color:var(--ink);line-height:1.55}
+
 @media(prefers-reduced-motion:reduce){
   *{transition:none !important;animation:none !important}
 }
