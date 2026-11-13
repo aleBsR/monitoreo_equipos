@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, Pressable, FlatList, StyleSheet, ScrollView } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { NetmonWS, parseNodes, parseRes } from './netmon';
+import { C } from './theme';
+import Topologia from './Topologia';
 
-const GRAD = '#E1306C';
 const EXECS = ['RESTART_SERVICE', 'DIAGNOSTIC', 'CLEAR_LOGS'];
 
 export default function App() {
@@ -71,8 +72,8 @@ export default function App() {
         <StatusBar style="light" />
         <View style={s.hero}>
           <Text style={s.heroTitle}>SDMR 📡</Text>
-          <Text style={s.heroSub}>Monitoreo en Red · estilo Instagram</Text>
-          <Text style={s.heroHint}>Mismo NETMON/1.0 de Python por gateway WS→TCP</Text>
+          <Text style={s.heroSub}>Centro de Operaciones de Red (NOC)</Text>
+          <Text style={s.heroHint}>Mismo NETMON/1.0 de Python por gateway WS→TCP · topología interactiva</Text>
         </View>
         <View style={s.form}>
           <Text style={s.h}>Iniciar sesión</Text>
@@ -96,14 +97,14 @@ export default function App() {
 
   return (
     <View style={s.app}>
-      <StatusBar style="dark" />
+      <StatusBar style="light" />
       <View style={s.top}>
         <Text style={s.logo}>SDMR</Text>
         <Text style={s.topInfo}>{info}</Text>
         <Pressable onPress={() => { try { cli.close() } catch {} setCli(null) }}><Text style={s.salir}>Salir</Text></Pressable>
       </View>
       <View style={s.tabs}>
-        {[['feed', 'Feed'], ['nodos', 'Nodos'], ['trafico', 'Tráfico']].map(([k, l]) => (
+        {[['feed', 'Feed'], ['nodos', 'Nodos'], ['topo', 'Topología'], ['trafico', 'Tráfico']].map(([k, l]) => (
           <Pressable key={k} onPress={() => setTab(k)} style={[s.tab, tab === k && s.tabOn]}>
             <Text style={[s.tabT, tab === k && s.tabTOn]}>{l}</Text>
           </Pressable>
@@ -112,18 +113,23 @@ export default function App() {
       {tab === 'feed' && (
         <ScrollView style={s.body}>
           <View style={s.kpis}>
-            <View style={s.kpi}><Text style={s.kpiN}>{total}</Text><Text>nodos</Text></View>
-            <View style={s.kpi}><Text style={[s.kpiN, { color: 'green' }]}>{on}</Text><Text>online</Text></View>
-            <View style={s.kpi}><Text style={[s.kpiN, { color: 'red' }]}>{off}</Text><Text>offline</Text></View>
+            <View style={s.kpi}><Text style={s.kpiN}>{total}</Text><Text style={s.kpiLbl}>nodos</Text></View>
+            <View style={s.kpi}><Text style={[s.kpiN, { color: C.ok }]}>{on}</Text><Text style={s.kpiLbl}>online</Text></View>
+            <View style={s.kpi}><Text style={[s.kpiN, { color: C.off }]}>{off}</Text><Text style={s.kpiLbl}>offline</Text></View>
           </View>
           {nodos.map(n => (
             <View key={n.id} style={s.post}>
               <Text style={s.postH}>● {n.id} · {n.ip} · {n.estado}</Text>
-              <Text>CPU {n.cpu}% · RAM {n.ram}% · DISK {n.disco}%</Text>
+              <Text style={s.postBody}>CPU {n.cpu}% · RAM {n.ram}% · DISK {n.disco}%</Text>
               <View style={s.bar}><View style={[s.fill, { width: `${n.cpu}%` }]} /></View>
             </View>
           ))}
           {nodos.length === 0 && <Text style={s.hint}>Sin nodos. Levantá agentes en las laptops.</Text>}
+        </ScrollView>
+      )}
+      {tab === 'topo' && (
+        <ScrollView style={s.body}>
+          <Topologia nodos={nodos} />
         </ScrollView>
       )}
       {tab === 'nodos' && (
@@ -152,37 +158,39 @@ export default function App() {
 }
 
 const s = StyleSheet.create({
-  login: { flex: 1, backgroundColor: '#fafafa' },
-  hero: { backgroundColor: '#833AB4', padding: 36, paddingTop: 64 },
-  heroTitle: { color: '#fff', fontSize: 34, fontWeight: '900' },
-  heroSub: { color: '#fff', fontSize: 15, marginTop: 4 },
-  heroHint: { color: '#fff', opacity: 0.85, marginTop: 8, fontSize: 12 },
+  login: { flex: 1, backgroundColor: C.bg },
+  hero: { backgroundColor: '#0D2A45', padding: 36, paddingTop: 60, borderBottomWidth: 1, borderColor: C.line },
+  heroTitle: { color: C.accent, fontSize: 34, fontWeight: '900' },
+  heroSub: { color: C.inkStrong, fontSize: 15, marginTop: 4 },
+  heroHint: { color: C.ink, opacity: 0.85, marginTop: 8, fontSize: 12 },
   form: { padding: 22 },
-  h: { fontSize: 22, fontWeight: '800', marginBottom: 10 },
-  label: { fontSize: 12, color: '#8e8e8e', marginTop: 10 },
-  in: { borderWidth: 1, borderColor: '#dbdbdb', borderRadius: 10, padding: 10, backgroundColor: '#fff', marginTop: 4 },
-  btn: { backgroundColor: GRAD, borderRadius: 10, padding: 13, marginTop: 16, alignItems: 'center' },
-  btnT: { color: '#fff', fontWeight: '800' },
-  err: { backgroundColor: '#fdecea', color: '#9c1c1c', padding: 10, borderRadius: 10, marginTop: 10 },
-  hint: { color: '#8e8e8e', fontSize: 12, marginTop: 8 },
-  app: { flex: 1, backgroundColor: '#fafafa', paddingTop: 44 },
-  top: { flexDirection: 'row', alignItems: 'center', padding: 12, backgroundColor: '#fff', borderBottomWidth: 1, borderColor: '#dbdbdb' },
-  logo: { fontWeight: '900', fontSize: 20, color: GRAD },
-  topInfo: { flex: 1, fontSize: 11, color: '#8e8e8e', marginLeft: 10 },
-  salir: { color: GRAD, fontWeight: '700' },
-  tabs: { flexDirection: 'row', backgroundColor: '#fff', borderBottomWidth: 1, borderColor: '#dbdbdb' },
+  h: { fontSize: 22, fontWeight: '800', marginBottom: 10, color: C.inkStrong },
+  label: { fontSize: 12, color: C.muted, marginTop: 10 },
+  in: { borderWidth: 1, borderColor: C.line, borderRadius: 10, padding: 10, backgroundColor: C.bgSoft, color: C.ink, marginTop: 4 },
+  btn: { backgroundColor: C.accent, borderRadius: 10, padding: 13, marginTop: 16, alignItems: 'center' },
+  btnT: { color: '#04121c', fontWeight: '800' },
+  err: { backgroundColor: 'rgba(239,68,68,0.12)', color: '#fca5a5', borderWidth: 1, borderColor: 'rgba(239,68,68,0.4)', padding: 10, borderRadius: 10, marginTop: 10 },
+  hint: { color: C.muted, fontSize: 12, marginTop: 8 },
+  app: { flex: 1, backgroundColor: C.bg, paddingTop: 44 },
+  top: { flexDirection: 'row', alignItems: 'center', padding: 12, backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.line },
+  logo: { fontWeight: '900', fontSize: 20, color: C.accent },
+  topInfo: { flex: 1, fontSize: 11, color: C.muted, marginLeft: 10 },
+  salir: { color: C.accent, fontWeight: '700' },
+  tabs: { flexDirection: 'row', backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.line },
   tab: { flex: 1, padding: 12, alignItems: 'center' },
-  tabOn: { borderBottomWidth: 2, borderColor: GRAD },
-  tabT: { color: '#8e8e8e', fontWeight: '600' },
-  tabTOn: { color: '#262626', fontWeight: '800' },
+  tabOn: { borderBottomWidth: 2, borderColor: C.accent },
+  tabT: { color: C.muted, fontWeight: '600' },
+  tabTOn: { color: C.inkStrong, fontWeight: '800' },
   body: { padding: 12 },
   kpis: { flexDirection: 'row', gap: 8, marginBottom: 10 },
-  kpi: { flex: 1, backgroundColor: '#fff', borderWidth: 1, borderColor: '#dbdbdb', borderRadius: 14, padding: 12, alignItems: 'center' },
-  kpiN: { fontSize: 22, fontWeight: '900' },
-  post: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#dbdbdb', borderRadius: 14, padding: 12, marginBottom: 10 },
-  postH: { fontWeight: '800', marginBottom: 4 },
-  bar: { height: 8, backgroundColor: '#eee', borderRadius: 99, marginTop: 6 },
-  fill: { height: 8, backgroundColor: GRAD, borderRadius: 99 },
-  row: { padding: 10, backgroundColor: '#fff', borderWidth: 1, borderColor: '#eee', borderRadius: 10, marginTop: 6 },
-  mono: { fontFamily: 'monospace', fontSize: 11, backgroundColor: '#111', color: '#9f9', padding: 6, borderRadius: 6, marginTop: 4 }
+  kpi: { flex: 1, backgroundColor: C.card, borderWidth: 1, borderColor: C.line, borderRadius: 14, padding: 12, alignItems: 'center' },
+  kpiN: { fontSize: 22, fontWeight: '900', color: C.inkStrong },
+  kpiLbl: { fontSize: 12, color: C.muted },
+  post: { backgroundColor: C.card, borderWidth: 1, borderColor: C.line, borderRadius: 14, padding: 12, marginBottom: 10 },
+  postH: { fontWeight: '800', marginBottom: 4, color: C.inkStrong },
+  postBody: { color: C.ink },
+  bar: { height: 8, backgroundColor: '#0a1422', borderWidth: 1, borderColor: C.lineSoft, borderRadius: 99, marginTop: 6, overflow: 'hidden' },
+  fill: { height: '100%', backgroundColor: C.accent, borderRadius: 99 },
+  row: { padding: 10, backgroundColor: C.bgSoft, borderWidth: 1, borderColor: C.line, borderRadius: 10, marginTop: 6, color: C.ink },
+  mono: { fontFamily: 'monospace', fontSize: 11, backgroundColor: '#060d18', color: '#86efac', borderWidth: 1, borderColor: C.line, padding: 6, borderRadius: 6, marginTop: 4 }
 });

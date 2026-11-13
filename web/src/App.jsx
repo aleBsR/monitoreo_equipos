@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { NetmonWS, parseNodes, parseRes } from './lib/netmon.js'
+import Topologia from './components/Topologia.jsx'
 
 const EXECS = ['RESTART_SERVICE', 'DIAGNOSTIC', 'CLEAR_LOGS']
 
@@ -49,11 +50,11 @@ function Login({ onOk }) {
         <div className="phone-art">
           <div style={{ fontSize: 28, fontWeight: 900 }}>SDMR 📡</div>
           <div style={{ opacity: .95 }}>Sistema Distribuido de Monitoreo en Red</div>
-          <div className="hint" style={{ color: '#fff', opacity: .85 }}>
-            Mismo protocolo <b>NETMON/1.0</b> que la consola Python, pero con onda Instagram.
-            Login separado, feed de nodos, historias y tráfico en vivo.
+          <div className="hint" style={{ color: '#E2E8F0', opacity: .9 }}>
+            Mismo protocolo <b>NETMON/1.0</b> que la consola Python, con estética NOC
+            (centro de operaciones de red). Feed de nodos, topología interactiva y tráfico en vivo.
           </div>
-          <div className="hint" style={{ color: '#fff', opacity: .8 }}>
+          <div className="hint" style={{ color: '#94A3B8', opacity: .95 }}>
             Hotspot del celu: poné la IP LAN del servidor, ej. ws://192.168.43.10:5003
           </div>
         </div>
@@ -208,7 +209,7 @@ export default function App() {
 
       <div className="layout">
         <div className="sidebar">
-          {[['feed', '◉ Feed'], ['nodos', '▦ Nodos'], ['topo', '✦ Topología'], ['trafico', '⇄ Tráfico'], ['redextra', '🌐 Red (extra)'], ['ayuda', '? Ayuda']].map(([k, l]) => (
+          {[['feed', '◉ Feed'], ['nodos', '▦ Nodos'], ['topo', '◈ Topología'], ['trafico', '⇄ Tráfico'], ['redextra', '🌐 Red (extra)'], ['ayuda', '? Ayuda']].map(([k, l]) => (
             <button key={k} className={'navbtn' + (tab === k ? ' active' : '')} onClick={() => setTab(k)}>{l}</button>
           ))}
           <div className="hint" style={{ padding: '8px 12px' }}>NETMON/1.0<br />UDP 5000 · TCP 5001<br />WS 5003 (gateway)</div>
@@ -285,18 +286,7 @@ export default function App() {
               </div></div>
           )}
 
-          {tab === 'topo' && (
-            <div className="card"><div className="card-h"><b>Topología (quién habla con quién)</b></div>
-              <div className="card-b">
-                <div className="topo">
-                  <div className="node-chip" style={{ borderColor: 'var(--ig-pink)' }}><b>🖥 servidor</b><div className="hint">UDP 5000 · TCP 5001 · WS 5003</div></div>
-                  {nodos.map(n => (
-                    <div key={n.id} className="node-chip"><b>{n.estado === 'OFFLINE' ? '🔴' : '🟢'} {n.id}</b><div className="hint">{n.ip} · CPU {n.cpu}%</div></div>
-                  ))}
-                </div>
-                <div className="hint" style={{ marginTop: 8 }}>UDP: telemetría periódica (se pierde, no pasa nada). TCP/WS: comandos confiables + EXEC.</div>
-              </div></div>
-          )}
+          {tab === 'topo' && (<Topologia nodos={nodos} />)}
 
           {tab === 'trafico' && (
             <div className="card"><div className="card-h"><b>Tráfico NETMON/1.0 (prueba RF07)</b></div>
@@ -330,7 +320,7 @@ export default function App() {
                       <tr key={h.ip}><td>{h.ip}</td><td>{h.mac}</td><td>{h.hostname || '—'}</td></tr>))}</tbody></table>
                 </div>
                 {redHosts.length === 0 && !redCargando && !redError && <div className="hint" style={{ marginTop: 8 }}>Sin hosts. Ejecutá extras/lan_scan_service.py y pulsá "Escanear LAN".</div>}
-                <div className="hint" style={{ marginTop: 12, padding: 10, background: '#fff7e6', borderRadius: 8, lineHeight: 1.5 }}>
+                <div className="hint" style={{ marginTop: 12, padding: 10, background: 'rgba(245,158,11,.10)', border: '1px solid rgba(245,158,11,.35)', color: '#E2E8F0', borderRadius: 8, lineHeight: 1.5 }}>
                   <b>⚠️ Explicación para la defensa (formal):</b><br/>
                   Esta sección NO utiliza el protocolo NETMON/1.0 ni los puertos UDP 5000 / TCP 5001 / WS 5003 del SDMR. Es un servicio HTTP auxiliar independiente (puerto 8090) para diagnóstico de red, aislado del monitoreo. El monitoreo de nodos sigue usando exclusivamente NETMON/1.0 sobre UDP/TCP/WebSocket. Si se solicita retirar esta funcionalidad extra, basta con eliminar la carpeta <code>extras/</code> y esta sección: el SDMR queda intacto.<br/><br/>
                   <b>Para nosotros (comprensión):</b> el escaneo de red (ARP) no encaja en NETMON porque NETMON monitorea nodos que ya se registraron por telemetría UDP; descubrir hosts arbitrarios de la LAN es otra cosa (diagnóstico), por eso lo separamos en un servicio HTTP aparte. Así el core queda limpio y la cátedra puede pedirnos sacarlo sin tocar el protocolo ni los tests.
