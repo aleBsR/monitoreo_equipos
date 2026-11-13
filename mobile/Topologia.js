@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { View, Text, Pressable, StyleSheet } from 'react-native'
 import Svg, { G, Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg'
 import { C, estadoColor, estadoBadge } from './theme'
-import { TIPOS, ETIQUETAS, tipoDe, etiquetaTipo } from './deviceType'
+import { TIPOS, tipoDe, etiquetaTipo } from './deviceType'
 
 const VW = 360
 const VH = 300

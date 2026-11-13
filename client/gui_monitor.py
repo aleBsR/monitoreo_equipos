@@ -451,6 +451,19 @@ class SDMRMonitorGUI:
             ayuda="Índice de la guía · el contenido es material del proyecto.",
         )
 
+    def _construir_pestana_conceptos(self):
+        """
+        Pestaña 5: conceptos de redes (TCP/UDP, sockets, framing, etc.).
+        Las definiciones son citas LITERALES de Kurose; el buscador ayuda a
+        ubicarlas rápido durante la defensa. No necesita servidor en marcha.
+        """
+        self._pestaña_ayuda(
+            titulo="Conceptos TCP/UDP",
+            items=CONCEPTOS,
+            ayuda="Fuente: " + FUENTE_LIBRO,
+            con_buscador=True,
+        )
+
     def _construir_pestana_red_extra(self):
         """
         Pestaña EXTRA: descubrimiento de hosts en la LAN con Scapy (opcional).

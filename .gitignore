@@ -31,3 +31,9 @@ agent/config.ini
 # Expo (estado local del Metro, no commitear)
 .expo/
 mobile/.expo/
+
+# Archivos de bloqueo de LibreOffice/Office
+~$*
+
+# Scratch del flujo de trabajo (ledger interno)
+.superpowers/

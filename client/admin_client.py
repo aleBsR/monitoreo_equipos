@@ -18,7 +18,6 @@ Operaciones TCP soportadas:
 import socket
 import sys
 import os
-import re
 
 # Permitir importar el protocolo común
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
