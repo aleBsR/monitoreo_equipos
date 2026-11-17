@@ -138,7 +138,7 @@ http://TU_IP:5173            # desde otro equipo o el celu
 *En el Login, campo **Gateway**: `ws://127.0.0.1:5003` (misma PC) o
 `ws://TU_IP:5003` (red). Usuario `admin` / `admin123`.*
 
-#### E. Servicio HTTP extra "Red (extra)" (opcional, NO usa NETMON/1.0)
+#### D. Servicio HTTP extra "Red (extra)" (opcional, NO usa NETMON/1.0)
 
 Servicio auxiliar para diagnóstico de red (descubrimiento de hosts en la LAN).
 Es INDEPENDIENTE del protocolo NETMON/1.0: no usa UDP 5000 / TCP 5001 / WS 5003
@@ -155,7 +155,7 @@ un texto explicativo para la defensa que aclara que NO usa NETMON/1.0.
 
 Requiere Scapy + Npcap solo si querés ARP scan real; si no, usa fallback `arp -a`.
 
-#### D. App móvil con Expo Go (celu/tablet Android)
+#### E. App móvil con Expo Go (celu/tablet Android)
 Requiere el gateway del paso 2 en marcha y el **puerto 8081 abierto**.
 ```bash
 cd mobile
@@ -273,22 +273,22 @@ Comprueba `[1/3]` PING TCP, `[2/3]` telemetría UDP registrada y `[3/3]`
 gateway WS para web/móvil. Si algo falla, indica si el problema es la IP o el
 firewall, y sugiere las reglas a abrir.
 
-### 7. Auto-instalacion del agente (sin terminal, al iniciar sesion)
+### 6. Auto-instalacion del agente (sin terminal, al iniciar sesion)
 
 Para dejar un equipo cliente monitoreandose solo, sin abrir terminales:
 
 **Windows (en el equipo cliente, dentro de la carpeta del proyecto):**
-`at
+```bat
 scripts\instalar_agente.bat                # IP por broadcast (automatico)
 scripts\instalar_agente.bat 192.168.1.50    # IP fija en agent\config.ini
 scripts\instalar_agente.bat 192.168.1.50 LAPTOP-JUAN
-`
+```
 **Linux / macOS:**
-`ash
+```bash
 ./scripts/instalar_agente.sh
 ./scripts/instalar_agente.sh 192.168.1.50 NODO_02
-`
-Que hace: escribe gent/config.ini, crea el acceso directo de arranque
+```
+Que hace: escribe agent/config.ini, crea el acceso directo de arranque
 (carpeta de Inicio en Windows / ~/.config/autostart en Linux), abre la regla
 de firewall del canal EXEC (TCP 5002) si hay administrador, y arranca el agente
 oculto (pythonw.exe / nohup). Para quitarlo: scripts\desinstalar_agente.bat /
@@ -308,10 +308,10 @@ saber la IP del servidor de antemano. El dashboard incluye el boton
 "Copiar comando para clientes" que copia el comando de instalacion con la IP
 del servidor al que esta conectado.
 
-El agente corre sin ventana y escribe su log en gent/agente.log (rotacion
+El agente corre sin ventana y escribe su log en agent/agente.log (rotacion
 automatica a 512 KB).
 
-### 6. En otro equipo: administrar con el cliente o el dashboard
+### 7. En otro equipo: administrar con el cliente o el dashboard
 
 ```bash
 # Consola CLI
