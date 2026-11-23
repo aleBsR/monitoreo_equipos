@@ -41,3 +41,11 @@ mobile/.expo/
 # Skills / contexto de asistentes de IA (se mantienen locales, no se versionan)
 .claude/
 .opencode/
+
+# Material de referencia pesado de la catedra (libro/diapositivas con copyright):
+# se mantienen locales, no se versionan (inflan el repo ~15 MB)
+docs/Redes de Computadoras 5ed - 2010 - Kurose con Notas.pdf
+docs/Capitulo2.v2.ppt
+
+# Exportaciones PDF generadas desde los .md (redundantes, se regeneran)
+docs/guia_defensa_transportes.pdf
