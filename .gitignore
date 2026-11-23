@@ -42,10 +42,12 @@ mobile/.expo/
 .claude/
 .opencode/
 
-# Material de referencia pesado de la catedra (libro/diapositivas con copyright):
-# se mantienen locales, no se versionan (inflan el repo ~15 MB)
-docs/Redes de Computadoras 5ed - 2010 - Kurose con Notas.pdf
-docs/Capitulo2.v2.ppt
+# Material no-codigo de docs/: material de catedra (libro/diapositivas/enunciado),
+# exports PDF generados desde los .md e informes .docx. Se mantienen LOCALES y no
+# se versionan. En docs/ solo versionamos la documentacion propia en .md.
+docs/*.pdf
+docs/*.ppt
+docs/*.docx
 
-# Exportaciones PDF generadas desde los .md (redundantes, se regeneran)
-docs/guia_defensa_transportes.pdf
+# Plan y spec generados por el flujo de trabajo de IA (ruido de proceso, no doc del proyecto)
+docs/superpowers/
