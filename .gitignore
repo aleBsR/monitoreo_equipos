@@ -42,12 +42,7 @@ mobile/.expo/
 .claude/
 .opencode/
 
-# Material no-codigo de docs/: material de catedra (libro/diapositivas/enunciado),
-# exports PDF generados desde los .md e informes .docx. Se mantienen LOCALES y no
-# se versionan. En docs/ solo versionamos la documentacion propia en .md.
-docs/*.pdf
-docs/*.ppt
-docs/*.docx
-
-# Plan y spec generados por el flujo de trabajo de IA (ruido de proceso, no doc del proyecto)
-docs/superpowers/
+# Carpeta docs/ completa: material de estudio y preparacion para la defensa,
+# documentacion de referencia de la catedra (libro, diapositivas, enunciado),
+# informes y exports. NO es parte del codigo: se mantiene LOCAL y no se versiona.
+docs/
