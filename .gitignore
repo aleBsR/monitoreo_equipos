@@ -37,3 +37,7 @@ mobile/.expo/
 
 # Scratch del flujo de trabajo (ledger interno)
 .superpowers/
+
+# Skills / contexto de asistentes de IA (se mantienen locales, no se versionan)
+.claude/
+.opencode/
