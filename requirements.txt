@@ -7,3 +7,7 @@ websockets>=12.0
 # --- Extra (opcional): descubrimiento de hosts en la LAN con Scapy ---
 # Requiere Npcap (Windows) y privilegios de administrador.
 # scapy>=2.5.0
+# --- Seguridad: SOLO para generar los certificados TLS una vez ---
+# El sistema en ejecucion usa 'ssl' de la biblioteca estandar y NO necesita esto.
+# Instalar solo si se van a (re)generar certs con scripts/gen_certs.py.
+# cryptography>=42.0.0

@@ -35,6 +35,7 @@ Decisiones de diseño:
 
 import os
 import re
+import ssl
 import sys
 import time
 import queue
@@ -57,6 +58,7 @@ from common.protocol import (
     build_tcp_command,
     parse_tcp_response,
 )
+from common import security
 from client.contenido_ayuda import INSTRUCCIONES, CONCEPTOS, FUENTE_LIBRO
 
 try:
@@ -113,6 +115,12 @@ class SDMRMonitorGUI:
         self.is_authenticated = False
         self.rx_buffer = b""          # Búfer de recepción para encuadrado de trama
         self.usuario = None
+
+        # Seguridad opcional (TLS). Se lee de las opciones de arranque; por
+        # defecto, desactivada (la GUI se conecta en claro como siempre).
+        self.seguro = bool(self.opciones.get("seguro", False))
+        self.dir_certs = self.opciones.get("dir_certs") or security.ruta_certs_por_defecto()
+        self.verificar_host = self.opciones.get("verificar_host", True)
 
         # ---------------------------------------------------------
         # Estado de la demo local (procesos hijo)
@@ -789,11 +797,22 @@ class SDMRMonitorGUI:
             return
 
         try:
-            self.tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.tcp_socket.settimeout(5.0)
+            raw_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            raw_socket.settimeout(5.0)
+            # Envoltura TLS opcional: verifica al servidor contra la CA y presenta
+            # el certificado de cliente 'gui'. El handshake TLS va con el connect().
+            if self.seguro:
+                ctx = security.contexto_cliente_desde_dir(self.dir_certs, "gui", self.verificar_host)
+                self.tcp_socket = ctx.wrap_socket(raw_socket, server_hostname=host)
+            else:
+                self.tcp_socket = raw_socket
             self.tcp_socket.connect((host, puerto))
         except socket.timeout:
             self._registrar("Sistema", f"Tiempo agotado al conectar a {host}:{puerto}.", "err")
+            self._cerrar_socket()
+            return
+        except ssl.SSLError as e:
+            self._registrar("Sistema", f"Fallo de verificación TLS al conectar a {host}:{puerto}: {e}", "err")
             self._cerrar_socket()
             return
         except ConnectionRefusedError:
@@ -1383,6 +1402,9 @@ if __name__ == "__main__":
     parser.add_argument("--udp", type=int, default=None, help="Puerto UDP de telemetría")
     parser.add_argument("--tcp", type=int, default=None, help="Puerto TCP de comandos")
     parser.add_argument("--host", default=None, help="IP del servidor central")
+    parser.add_argument("--seguro", action="store_true", help="Conectar por TLS (el servidor debe estar en modo --seguro)")
+    parser.add_argument("--certs", default=None, help="Carpeta de certificados (def: ./certs)")
+    parser.add_argument("--no-verificar-host", action="store_true", help="No exigir que el host coincida con el SAN del certificado")
     args = parser.parse_args()
 
     opciones = {
@@ -1391,6 +1413,9 @@ if __name__ == "__main__":
         "udp": args.udp,
         "tcp": args.tcp,
         "host": args.host,
+        "seguro": args.seguro,
+        "dir_certs": args.certs or security.ruta_certs_por_defecto(),
+        "verificar_host": not args.no_verificar_host,
     }
 
     raiz = tk.Tk()

@@ -65,6 +65,7 @@ from common.protocol import (
     FrameTooLongError,
     configurar_salida,
 )
+from common import security
 
 # Comandos administrativos que el agente acepta ejecutar (lista permitida).
 # Es una simulación controlada: no se ejecuta nada arbitrario del sistema.
@@ -161,7 +162,8 @@ class SystemNodeAgent:
     """
 
     def __init__(self, node_id: str = None, server_host: str = None, server_udp_port: int = DEFAULT_UDP_PORT,
-                 interval: float = 3.0, cmd_port: int = DEFAULT_AGENT_TCP_PORT, bind_host: str = "0.0.0.0"):
+                 interval: float = 3.0, cmd_port: int = DEFAULT_AGENT_TCP_PORT, bind_host: str = "0.0.0.0",
+                 seguro: bool = False, hmac_key: bytes = None):
         # Sin ID explícito se usa el nombre de la máquina: dos agentes nunca
         # chocan y el administrador reconoce el equipo de un vistazo.
         self.node_id = node_id or socket.gethostname() or "NODO_01"
@@ -175,6 +177,12 @@ class SystemNodeAgent:
         self.cmd_port = cmd_port
         self.bind_host = bind_host
         self.is_running = False
+
+        # Seguridad opcional: si `seguro`, la telemetría y el descubrimiento UDP
+        # se firman con HMAC usando la clave compartida, y se verifica el SRVINFO.
+        self.seguro = seguro
+        self.hmac_key = hmac_key
+        self.nonce_cache = security.CacheNonces()
 
         # Socket UDP (AF_INET, SOCK_DGRAM): no requiere connect(), envía con sendto()
         self.udp_socket = None
@@ -384,9 +392,19 @@ class SystemNodeAgent:
             destinos.append("127.0.0.1")
         return destinos
 
+    def _empaquetar(self, payload: str) -> bytes:
+        """
+        Codifica un payload NETMON para enviar por UDP. En modo seguro lo envuelve
+        en el sobre firmado (HMAC-SHA256 + timestamp + nonce); si no, lo codifica
+        tal cual (comportamiento de siempre).
+        """
+        if self.seguro:
+            payload = security.envolver_udp(payload, self.hmac_key)
+        return encode_message(payload)
+
     def _enviar_srvreq(self):
         """Emite una solicitud de descubrimiento a todos los destinos posibles."""
-        trama = encode_message(build_srv_request(self.node_id))
+        trama = self._empaquetar(build_srv_request(self.node_id))
         for destino in self._destinos_descubrimiento():
             try:
                 self.udp_socket.sendto(trama, (destino, self.server_udp_port))
@@ -415,6 +433,14 @@ class SystemNodeAgent:
                 break
 
             mensaje = decode_message(datos)
+            # En modo seguro, el SRVINFO debe venir firmado por el servidor legítimo.
+            if self.seguro:
+                if not security.es_sobre_seguro(mensaje):
+                    continue
+                try:
+                    mensaje = security.desenvolver_udp(mensaje, self.hmac_key, self.nonce_cache)
+                except ValueError:
+                    continue
             if not mensaje.startswith("SRVINFO|"):
                 continue
             try:
@@ -544,7 +570,8 @@ class SystemNodeAgent:
                 # 2. Construir la trama del protocolo NETMON/1.0 (incluye el
                 #    puerto de comandos para que el servidor pueda hacer EXEC)
                 telemetry_str = build_udp_telemetry(self.node_id, local_ip, cpu, ram, disk, status, self.cmd_port)
-                raw_bytes = encode_message(telemetry_str)
+                # En modo seguro se firma con HMAC; si no, se codifica tal cual.
+                raw_bytes = self._empaquetar(telemetry_str)
 
                 # 3. Transmitir el datagrama UDP utilizando sendto()
                 self.udp_socket.sendto(raw_bytes, (self.server_host, self.server_udp_port))
@@ -686,6 +713,8 @@ def main():
     parser.add_argument("--udp", type=int, default=None, help="Puerto UDP del servidor (5000)")
     parser.add_argument("--cmd", type=int, default=None, help="Puerto TCP local de comandos EXEC (5002)")
     parser.add_argument("--intervalo", type=float, default=None, help="Segundos entre telemetrías (3)")
+    parser.add_argument("--seguro", action="store_true",
+                        help="Firma la telemetría y el descubrimiento UDP con HMAC (requiere SDMR_HMAC_KEY)")
     args = parser.parse_args()
 
     MODO_SILENCIO = args.silent
@@ -711,12 +740,25 @@ def main():
 
     intervalo = args.intervalo if args.intervalo is not None else config["intervalo"]
 
+    # Seguridad: si se pide modo seguro, cargar la clave HMAC compartida del
+    # entorno (SDMR_HMAC_KEY). Si falta, salir con un mensaje claro.
+    hmac_key = None
+    if args.seguro:
+        try:
+            hmac_key = security.clave_hmac_desde_entorno()
+        except ValueError as e:
+            log(f"[SEGURIDAD] No se pudo activar el modo seguro: {e}", forzar_archivo=True)
+            sys.exit(1)
+        log("[SEGURIDAD] Telemetría y descubrimiento UDP firmados con HMAC-SHA256.")
+
     agente = SystemNodeAgent(
         node_id=id_nodo,
         server_host=ip_servidor,
         server_udp_port=puerto_udp,
         interval=intervalo,
         cmd_port=puerto_cmd,
+        seguro=args.seguro,
+        hmac_key=hmac_key,
     )
     agente.start()
 

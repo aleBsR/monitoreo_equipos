@@ -16,6 +16,7 @@ Operaciones TCP soportadas:
 """
 
 import socket
+import ssl
 import sys
 import os
 
@@ -31,6 +32,7 @@ from common.protocol import (
     TcpFrameReader,
     configurar_salida,
 )
+from common import security
 
 
 class AdminClient:
@@ -38,9 +40,15 @@ class AdminClient:
     Cliente de consola para administrar el servidor de monitoreo a través de Sockets TCP.
     """
 
-    def __init__(self, server_host: str = "127.0.0.1", server_tcp_port: int = DEFAULT_TCP_PORT):
+    def __init__(self, server_host: str = "127.0.0.1", server_tcp_port: int = DEFAULT_TCP_PORT,
+                 seguro: bool = False, dir_certs: str = None, verificar_host: bool = True):
         self.server_host = server_host
         self.server_tcp_port = server_tcp_port
+        # Seguridad opcional: si `seguro`, la conexión TCP se envuelve en TLS y se
+        # presenta el certificado de cliente 'admin'. Por defecto, desactivado.
+        self.seguro = seguro
+        self.dir_certs = dir_certs or security.ruta_certs_por_defecto()
+        self.verificar_host = verificar_host
         self.tcp_socket = None
         self.is_connected = False
         self.is_authenticated = False
@@ -56,19 +64,31 @@ class AdminClient:
         
         try:
             # 1. Crear socket TCP (SOCK_STREAM)
-            self.tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            raw_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             # Establecer un tiempo de espera máximo para la conexión
-            self.tcp_socket.settimeout(5.0)
+            raw_socket.settimeout(5.0)
 
-            # 2. Conectar al servidor remoto (Inicia el Handshake TCP: SYN -> SYN-ACK -> ACK)
+            # 1.b Envoltura TLS (opcional): verifica la identidad del servidor
+            # contra nuestra CA y presenta el certificado de cliente 'admin'.
+            # El handshake TLS ocurre junto con el connect() de abajo.
+            if self.seguro:
+                ctx = security.contexto_cliente_desde_dir(self.dir_certs, "admin", self.verificar_host)
+                self.tcp_socket = ctx.wrap_socket(raw_socket, server_hostname=self.server_host)
+                print("[SEGURIDAD] TLS activado: verificando el certificado del servidor...")
+            else:
+                self.tcp_socket = raw_socket
+
+            # 2. Conectar al servidor remoto (Inicia el Handshake TCP: SYN -> SYN-ACK -> ACK;
+            #    si hay TLS, a continuación negocia el handshake TLS)
             self.tcp_socket.connect((self.server_host, self.server_tcp_port))
-            
+
             # Remover timeout para operaciones subsecuentes de recepción si se desea
             self.tcp_socket.settimeout(None)
             self.is_connected = True
             # Buffer de encuadrado limpio para esta conexión
             self.frame_reader = TcpFrameReader()
-            print("[TCP] ¡Conexión TCP establecida con éxito con el servidor!")
+            exito = "¡Conexión TLS establecida y verificada!" if self.seguro else "¡Conexión TCP establecida con éxito con el servidor!"
+            print(f"[TCP] {exito}")
             return True
 
         except socket.timeout:
@@ -76,6 +96,10 @@ class AdminClient:
             return False
         except ConnectionRefusedError:
             print(f"[ERROR TCP] Conexión rechazada. Verifique si el servidor está en ejecución en el puerto {self.server_tcp_port}.")
+            return False
+        except ssl.SSLError as e:
+            print(f"[ERROR TLS] Falló la verificación TLS con el servidor: {e}")
+            print("           ¿El servidor está en modo --seguro y los certificados coinciden?")
             return False
         except Exception as e:
             print(f"[ERROR TCP] No se pudo establecer la conexión: {e}")
@@ -320,8 +344,14 @@ class AdminClient:
 
 if __name__ == "__main__":
     configurar_salida()
-    host_ip = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
-    port_tcp = int(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_TCP_PORT
+    # Uso: python client/admin_client.py [IP_SERVIDOR] [PUERTO_TCP] [--seguro]
+    opc = security.opciones_seguridad(sys.argv)
+    posicionales = security.args_posicionales(sys.argv)
+    host_ip = posicionales[0] if len(posicionales) > 0 else "127.0.0.1"
+    port_tcp = int(posicionales[1]) if len(posicionales) > 1 else DEFAULT_TCP_PORT
 
-    client = AdminClient(server_host=host_ip, server_tcp_port=port_tcp)
+    client = AdminClient(
+        server_host=host_ip, server_tcp_port=port_tcp,
+        seguro=opc["seguro"], dir_certs=opc["dir_certs"], verificar_host=opc["verificar_host"],
+    )
     client.run_menu()

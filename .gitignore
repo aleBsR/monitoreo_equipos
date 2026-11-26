@@ -42,6 +42,14 @@ mobile/.expo/
 .claude/
 .opencode/
 
+# Seguridad: certificados TLS, claves privadas y secretos. NUNCA versionar.
+# Se generan localmente con scripts/gen_certs.py y se distribuyen a mano.
+certs/
+*.key
+*.pem
+# Usuarios con contraseñas hasheadas (se crean con scripts/set_password.py)
+server/usuarios.json
+
 # Carpeta docs/ completa: material de estudio y preparacion para la defensa,
 # documentacion de referencia de la catedra (libro, diapositivas, enunciado),
 # informes y exports. NO es parte del codigo: se mantiene LOCAL y no se versiona.

@@ -44,14 +44,24 @@ except ImportError:
     sys.exit(1)
 
 from common.protocol import ENCODING, BUFFER_SIZE, configurar_salida
+from common import security
 
 
-async def puente_ws_tcp(websocket, tcp_host: str, tcp_port: int):
-    """Un WS <-> una conexion TCP al servidor central. Todo por lineas \\n."""
+async def puente_ws_tcp(websocket, tcp_host: str, tcp_port: int, ssl_ctx=None):
+    """Un WS <-> una conexion TCP al servidor central. Todo por lineas \\n.
+
+    Si `ssl_ctx` no es None, la conexion al servidor central va por TLS (el
+    gateway presenta su certificado de cliente 'gateway' y verifica al servidor).
+    El tramo navegador/celular <-> gateway (WS) sigue en claro: cifrarlo (WSS)
+    queda como mejora futura.
+    """
     peer = getattr(websocket, "remote_address", "?")
     print(f"[GW] WS conectado desde {peer}")
     try:
-        reader, writer = await asyncio.open_connection(tcp_host, tcp_port)
+        reader, writer = await asyncio.open_connection(
+            tcp_host, tcp_port, ssl=ssl_ctx,
+            server_hostname=tcp_host if ssl_ctx else None,
+        )
     except OSError as e:
         await websocket.send(f"RES|ERR|ERR_104|No se pudo conectar al servidor TCP {tcp_host}:{tcp_port}: {e}\n".strip())
         await websocket.close()
@@ -115,11 +125,12 @@ def servir_web_carpeta(carpeta: str, puerto: int = 5173):
     httpd.serve_forever()
 
 
-async def main_async(ws_port: int, tcp_host: str, tcp_port: int):
-    handler = functools.partial(puente_ws_tcp, tcp_host=tcp_host, tcp_port=tcp_port)
+async def main_async(ws_port: int, tcp_host: str, tcp_port: int, ssl_ctx=None):
+    handler = functools.partial(puente_ws_tcp, tcp_host=tcp_host, tcp_port=tcp_port, ssl_ctx=ssl_ctx)
     async with websockets.serve(handler, "0.0.0.0", ws_port, max_size=1_048_576):
+        modo = "TLS" if ssl_ctx else "en claro"
         print("=================================================================")
-        print(f" GATEWAY SDMR WS->TCP en 0.0.0.0:{ws_port} -> {tcp_host}:{tcp_port}")
+        print(f" GATEWAY SDMR WS->TCP en 0.0.0.0:{ws_port} -> {tcp_host}:{tcp_port} ({modo})")
         print(" Reenvio transparente de tramas NETMON/1.0 (sin REST, sin auth propia)")
         print("=================================================================")
         await asyncio.Future()  # corre para siempre
@@ -133,6 +144,9 @@ if __name__ == "__main__":
     ap.add_argument("tcp_port", nargs="?", type=int, default=5001)
     ap.add_argument("--serve-web", action="store_true", help="Servir web/dist por HTTP 5173")
     ap.add_argument("--web-port", type=int, default=5173)
+    ap.add_argument("--seguro", action="store_true", help="Conectar al servidor central por TLS (debe estar en --seguro)")
+    ap.add_argument("--certs", default=None, help="Carpeta de certificados (def: ./certs)")
+    ap.add_argument("--no-verificar-host", action="store_true", help="No exigir coincidencia de host con el SAN")
     args = ap.parse_args()
 
     if args.serve_web:
@@ -141,7 +155,13 @@ if __name__ == "__main__":
         t = threading.Thread(target=servir_web_carpeta, args=(dist, args.web_port), daemon=True)
         t.start()
 
+    ssl_ctx = None
+    if args.seguro:
+        dir_certs = args.certs or security.ruta_certs_por_defecto()
+        ssl_ctx = security.contexto_cliente_desde_dir(dir_certs, "gateway", not args.no_verificar_host)
+        print("[SEGURIDAD] Gateway en modo TLS hacia el servidor central.")
+
     try:
-        asyncio.run(main_async(args.ws_port, args.tcp_host, args.tcp_port))
+        asyncio.run(main_async(args.ws_port, args.tcp_host, args.tcp_port, ssl_ctx))
     except KeyboardInterrupt:
         print("\n[GW] Detenido por el usuario.")

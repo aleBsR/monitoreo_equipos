@@ -29,10 +29,13 @@ Características de Red e Hilos:
 """
 
 import socket
+import ssl
 import sys
 import threading
 import time
 import os
+import json
+import hmac
 import errno
 
 # Permitir importar módulos desde el directorio raíz del proyecto
@@ -62,6 +65,7 @@ from common.protocol import (
     FrameTooLongError,
     configurar_salida,
 )
+from common import security
 
 
 class MonitoringServer:
@@ -69,10 +73,23 @@ class MonitoringServer:
     Clase principal que encapsula la lógica del Servidor Central de Monitoreo.
     """
 
-    def __init__(self, host: str = "0.0.0.0", udp_port: int = DEFAULT_UDP_PORT, tcp_port: int = DEFAULT_TCP_PORT, offline_purge_seconds: float = 120.0):
+    def __init__(self, host: str = "0.0.0.0", udp_port: int = DEFAULT_UDP_PORT, tcp_port: int = DEFAULT_TCP_PORT, offline_purge_seconds: float = 120.0, seguro: bool = False, dir_certs: str = None):
         self.host = host
         self.udp_port = udp_port
         self.tcp_port = tcp_port
+
+        # --- Seguridad (OPCIONAL) ---------------------------------------------
+        # Si `seguro` es True, el canal TCP 5001 se envuelve en TLS (mutuo) y la
+        # telemetría UDP se verifica por HMAC. Por defecto está DESACTIVADO: el
+        # sistema se comporta igual que siempre y no rompe la demo ni los clientes
+        # viejos. El contexto TLS se construye en start() para fallar con un
+        # mensaje claro si faltan los certificados.
+        self.seguro = seguro
+        self.dir_certs = dir_certs or security.ruta_certs_por_defecto()
+        self.tls_context = None
+        # Clave HMAC compartida y caché anti-replay para la telemetría UDP firmada.
+        self.hmac_key = None
+        self.nonce_cache = None
 
         # Segundos de inactividad tolerados antes de PURGAR un nodo OFFLINE
         # del registro (evita que nodes_registry crezca sin límite)
@@ -86,11 +103,10 @@ class MonitoringServer:
         # Bandera de control para apagado controlado
         self.is_running = False
 
-        # Credenciales sencillas para la prueba de autenticación de administradores
-        self.admin_credentials = {
-            "admin": "admin123",
-            "operador": "operador123"
-        }
+        # Usuarios y roles. Se cargan en start() desde server/usuarios.json
+        # (contraseñas hasheadas con PBKDF2). Si el archivo no existe, se usa un
+        # juego de credenciales por defecto (modo demo / compatibilidad).
+        self.usuarios = {}
 
         # Sockets
         self.udp_socket = None
@@ -104,6 +120,37 @@ class MonitoringServer:
         print("=================================================================")
         print(" INICIALIZANDO SERVIDOR CENTRAL DE MONITOREO EN RED (SDMR)")
         print("=================================================================")
+
+        # ---------------------------------------------------------------------
+        # 0. SEGURIDAD (OPCIONAL): construir el contexto TLS antes de abrir
+        #    sockets. Si faltan los certificados, salir con un mensaje claro.
+        # ---------------------------------------------------------------------
+        if self.seguro:
+            try:
+                self.tls_context = security.contexto_servidor_desde_dir(self.dir_certs)
+            except (FileNotFoundError, ssl.SSLError, OSError) as e:
+                print("=================================================================")
+                print(f" [ERROR] Modo seguro activado pero no se pudo cargar TLS: {e}")
+                print(" ¿Generaste los certificados?  ->  python scripts/gen_certs.py")
+                print(f" Carpeta esperada: {self.dir_certs}")
+                print("=================================================================")
+                sys.exit(1)
+            # Clave HMAC para verificar la telemetría UDP firmada por los agentes.
+            try:
+                self.hmac_key = security.clave_hmac_desde_entorno()
+            except ValueError as e:
+                print("=================================================================")
+                print(f" [ERROR] Modo seguro activado pero no hay clave HMAC: {e}")
+                print("=================================================================")
+                sys.exit(1)
+            self.nonce_cache = security.CacheNonces()
+            print("[SEGURIDAD] TLS mutuo ACTIVADO en el canal TCP (los clientes deben presentar certificado).")
+            print("[SEGURIDAD] Telemetría UDP verificada con HMAC-SHA256 + anti-replay.")
+        else:
+            print("[SEGURIDAD] Modo INSEGURO (sin TLS/HMAC). Para activarlo, agregá: --seguro")
+
+        # Cargar usuarios y roles (PBKDF2 desde usuarios.json o fallback en código).
+        self.usuarios = self._cargar_usuarios()
 
         # ---------------------------------------------------------------------
         # 1. INICIALIZACIÓN DEL SOCKET UDP (Canal de Telemetría)
@@ -222,6 +269,10 @@ class MonitoringServer:
 
         ip_servidor = self._ip_hacia(addr[0])
         respuesta = build_srv_info(solicitud["node_id"], ip_servidor, self.udp_port, self.tcp_port)
+        # En modo seguro, el SRVINFO también se firma para que el agente verifique
+        # que la respuesta viene del servidor legítimo (y no de un impostor).
+        if self.seguro:
+            respuesta = security.envolver_udp(respuesta, self.hmac_key)
         try:
             self.udp_socket.sendto(encode_message(respuesta), addr)
             print(
@@ -242,6 +293,20 @@ class MonitoringServer:
                 # Retorna una tupla: (datos_recibidos: bytes, direccion_cliente: (IP, Puerto))
                 data, addr = self.udp_socket.recvfrom(BUFFER_SIZE)
                 raw_message = decode_message(data)
+
+                # 0.a SEGURIDAD: en modo seguro, TODO el tráfico UDP (telemetría y
+                #     descubrimiento) debe venir firmado. Se verifica el HMAC y el
+                #     anti-replay ANTES de interpretar nada; un datagrama inválido
+                #     se descarta y se loguea, sin cerrar nada (RF07).
+                if self.seguro:
+                    if not security.es_sobre_seguro(raw_message):
+                        print(f"[UDP - Seguridad] Datagrama sin firmar descartado de {addr[0]}.")
+                        continue
+                    try:
+                        raw_message = security.desenvolver_udp(raw_message, self.hmac_key, self.nonce_cache)
+                    except ValueError as e:
+                        print(f"[UDP - Seguridad] Datagrama rechazado de {addr[0]}: {e}")
+                        continue
 
                 # 0. Descubrimiento automático: SRVREQ -> SRVINFO
                 if self._responder_descubrimiento(raw_message, addr):
@@ -346,7 +411,23 @@ class MonitoringServer:
         """
         is_authenticated = False
         authenticated_user = None
+        authenticated_role = None
         reader = TcpFrameReader()
+
+        # Envoltura TLS por conexión. Se hace DENTRO del hilo del cliente para que
+        # el handshake (que puede demorar) no bloquee el accept() de otros clientes.
+        # Si el cliente no presenta un certificado válido, el handshake falla y se
+        # cierra solo esta conexión, sin afectar al servidor (RF07).
+        if self.tls_context is not None:
+            try:
+                client_socket = self.tls_context.wrap_socket(client_socket, server_side=True)
+            except (ssl.SSLError, OSError) as e:
+                print(f"[TCP - TLS] Handshake rechazado con {client_address}: {e}")
+                try:
+                    client_socket.close()
+                except OSError:
+                    pass
+                return
 
         try:
             while self.is_running:
@@ -378,13 +459,14 @@ class MonitoringServer:
                         action = command_data["action"]
                         params = command_data["params"]
 
-                        response_str = self._process_command(action, params, is_authenticated, client_address)
+                        response_str = self._process_command(action, params, is_authenticated, client_address, role=authenticated_role)
 
                         # Actualizar estado de autenticación si fue exitosa
                         if action == "AUTH" and response_str.startswith("RES|OK|AUTH_SUCCESS"):
                             is_authenticated = True
                             authenticated_user = params[0] if len(params) > 0 else "Unknown"
-                            print(f"[TCP - Sesión] Cliente {client_address} autenticado como '{authenticated_user}'")
+                            authenticated_role = self.usuarios.get(authenticated_user, {}).get("rol", "operador")
+                            print(f"[TCP - Sesión] Cliente {client_address} autenticado como '{authenticated_user}' (rol: {authenticated_role})")
 
                     except ValueError as ve:
                         response_str = build_tcp_response("ERR", ERR_MALFORMED_REQUEST, str(ve))
@@ -402,7 +484,62 @@ class MonitoringServer:
             client_socket.close()
             print(f"[TCP - Socket Cerrado] Recursos liberados para cliente {client_address}")
 
-    def _process_command(self, action: str, params: list, is_authenticated: bool, client_address: tuple) -> str:
+    def _cargar_usuarios(self) -> dict:
+        """
+        Carga los usuarios y sus roles desde `server/usuarios.json` (creado con
+        `scripts/set_password.py`), donde las contraseñas están HASHEADAS con
+        PBKDF2 salado, nunca en texto plano.
+
+        Si el archivo no existe, usa un juego de credenciales por defecto en
+        código (modo demo / compatibilidad con la versión previa y la suite de
+        pruebas). Para producción se recomienda generar el archivo.
+        """
+        ruta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "usuarios.json")
+        if os.path.exists(ruta):
+            try:
+                with open(ruta, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                print(f"[AUTH] {len(data)} usuario(s) cargado(s) desde usuarios.json (contraseñas PBKDF2 hasheadas).")
+                return data
+            except (OSError, ValueError) as e:
+                print(f"[AUTH] No se pudo leer usuarios.json ({e}); se usan credenciales por defecto.")
+
+        print("[AUTH] usuarios.json ausente: credenciales por defecto (admin / operador). "
+              "Generá hashes con: python scripts/set_password.py admin --rol admin")
+        return {
+            "admin": {"rol": "admin", "password_plano": "admin123"},
+            "operador": {"rol": "operador", "password_plano": "operador123"},
+        }
+
+    def _verificar_credenciales(self, username: str, password: str) -> tuple:
+        """
+        Verifica usuario y contraseña contra el registro cargado.
+
+        Soporta dos formatos de registro:
+          - Hasheado (desde usuarios.json): se valida con PBKDF2 en tiempo constante.
+          - En claro (fallback por defecto): comparación directa.
+
+        :return: Tupla (ok: bool, rol: str|None).
+        """
+        registro = self.usuarios.get(username)
+        if not registro:
+            return False, None
+
+        rol = registro.get("rol", "operador")
+
+        if "hash" in registro:
+            # Registro con contraseña hasheada (PBKDF2 salado).
+            if security.verificar_password(password, registro):
+                return True, rol
+            return False, None
+
+        # Fallback: contraseña en texto plano (solo credenciales por defecto).
+        esperado = registro.get("password_plano", "")
+        if hmac.compare_digest(password.encode(ENCODING), esperado.encode(ENCODING)):
+            return True, rol
+        return False, None
+
+    def _process_command(self, action: str, params: list, is_authenticated: bool, client_address: tuple, role: str = None) -> str:
         """
         Evalúa el comando recibido y genera la respuesta correspondiente respetando el protocolo.
         """
@@ -416,8 +553,9 @@ class MonitoringServer:
                 return build_tcp_response("ERR", ERR_MALFORMED_REQUEST, "Uso correcto: CMD|AUTH|<usuario>|<password>")
             
             username, password = params[0], params[1]
-            if username in self.admin_credentials and self.admin_credentials[username] == password:
-                return build_tcp_response("OK", "AUTH_SUCCESS", f"Bienvenido {username}")
+            ok, rol = self._verificar_credenciales(username, password)
+            if ok:
+                return build_tcp_response("OK", "AUTH_SUCCESS", f"Bienvenido {username} (rol: {rol})")
             else:
                 return build_tcp_response("ERR", ERR_UNAUTHORIZED, "Usuario o contraseña incorrectos")
 
@@ -449,6 +587,13 @@ class MonitoringServer:
 
         # 4. Ejecución de comandos remotos en un nodo (EXEC)
         elif action == "EXEC":
+            # RBAC: solo el rol 'admin' puede ejecutar comandos remotos.
+            # El 'operador' tiene acceso de solo lectura (PING / GET_NODES).
+            if role != "admin":
+                return build_tcp_response(
+                    "ERR", ERR_UNAUTHORIZED,
+                    f"Permiso denegado: EXEC requiere rol 'admin' (rol actual: {role or 'desconocido'})."
+                )
             if len(params) < 2:
                 return build_tcp_response("ERR", ERR_MALFORMED_REQUEST, "Uso correcto: CMD|EXEC|<ID_NODO>|<COMANDO>")
 
@@ -525,12 +670,22 @@ class MonitoringServer:
 if __name__ == "__main__":
     configurar_salida()
     # Permite especificar puertos desde la línea de comandos o usar los de defecto
-    # Uso: python3 server/server.py [udp_port] [tcp_port] [segundos_purga_offline]
-    udp_p = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_UDP_PORT
-    tcp_p = int(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_TCP_PORT
-    purga_s = float(sys.argv[3]) if len(sys.argv) > 3 else 120.0
+    # Uso: python3 server/server.py [udp_port] [tcp_port] [segundos_purga_offline] [--seguro]
+    #
+    # Se separan las banderas de seguridad (--seguro / --inseguro / --certs <dir>)
+    # de los argumentos POSICIONALES (puertos y purga), para no romper el uso de
+    # siempre ni confundir un flag con un número de puerto.
+    opc = security.opciones_seguridad(sys.argv)
+    posicionales = security.args_posicionales(sys.argv)
 
-    server = MonitoringServer(udp_port=udp_p, tcp_port=tcp_p, offline_purge_seconds=purga_s)
+    udp_p = int(posicionales[0]) if len(posicionales) > 0 else DEFAULT_UDP_PORT
+    tcp_p = int(posicionales[1]) if len(posicionales) > 1 else DEFAULT_TCP_PORT
+    purga_s = float(posicionales[2]) if len(posicionales) > 2 else 120.0
+
+    server = MonitoringServer(
+        udp_port=udp_p, tcp_port=tcp_p, offline_purge_seconds=purga_s,
+        seguro=opc["seguro"], dir_certs=opc["dir_certs"],
+    )
     try:
         server.start()
     except KeyboardInterrupt:
